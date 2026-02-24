@@ -26,8 +26,8 @@ pixi --version
 Clone this repository and enter the project folder:
 
 ```bash
-git clone https://github.com/Panch021/LavaFlow_Mapper_Suite.git
 cd LavaFlow_Mapper_Suite
+git clone https://github.com/Panch021/LavaFlow_Mapper_Suite.git
 ```
 
 ### 3. Run the Dashboard
