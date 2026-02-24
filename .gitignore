@@ -205,3 +205,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Personal configuration and keys
+config.txt
+historical_*.csv
+filter_VIIRS_combined.csv
+LavaFlow_propagation.csv
+max_distance_per_day_VIIRS.csv
+assets/
