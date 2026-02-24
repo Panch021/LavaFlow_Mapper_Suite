@@ -206,10 +206,17 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Personal configuration and keys
+# Configuration and Keys (KEEP PRIVATE)
 config.txt
+
+# Data Files (Too heavy for GitHub)
 historical_*.csv
 filter_VIIRS_combined.csv
 LavaFlow_propagation.csv
 max_distance_per_day_VIIRS.csv
-assets/
+max_distance_per_day_VIIRS.png
+
+# Environment and Temporary files
+.pixi/
+__pycache__/
+.DS_Store
