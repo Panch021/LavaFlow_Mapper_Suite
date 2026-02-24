@@ -25,3 +25,16 @@ Clone this repository and enter the project folder:
 git clone https://github.com/Panch021/LavaFlow_Mapper_Suite.git
 cd LavaFlow_Mapper_Suite
 ```
+
+### 3. Install Dependencies
+Open your terminal/PowerShell inside the project folder and run this command. Pixi will read your requirements file and install everything automatically:
+
+```bash
+pixi add --pypi -r requirements.txt
+```
+### 4. Run the Dashboard
+Once the dependencies are installed, you can launch the application with:
+
+```bash
+pixi run python main_dashboard.py
+```
