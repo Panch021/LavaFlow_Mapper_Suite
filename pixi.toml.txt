@@ -1,0 +1,24 @@
+[project]
+name = "lavaflow_mapper"
+version = "0.1.0"
+description = "Suite for monitoring volcanic thermal anomalies and lava flow propagation"
+authors = ["Francisco J. Vasconez <fjvasconez@igepn.edu.ec>"]
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "osx-64", "linux-64", "win-64"]
+
+[dependencies]
+python = "3.11.4"
+pandas = ">=2.0.0"
+numpy = ">=1.24.0"
+requests = ">=2.31.0"
+plotly = ">=5.15.0"
+dash = ">=2.11.0"
+dash-leaflet = ">=0.1.21"
+folium = ">=0.14.0"
+branca = ">=0.6.0"
+geopandas = ">=0.13.0"
+shapely = ">=2.0.1"
+pyproj = ">=3.5.0"
+
+[tasks]
+start = "python main_dashboard.py"
