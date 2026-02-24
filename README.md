@@ -1,23 +1,27 @@
-# LavaFlow_Mapper_Suite
-A Python/Dash suite for FIRMS data downloading, thermal anomaly counting, and lava flow propagation analysis.
-
 # 🌋 LavaFlow Mapper Suite
 
-An integrated tool for monitoring volcanic thermal anomalies and lava flow propagation using NASA FIRMS data.
+An integrated Python suite for monitoring volcanic thermal anomalies and lava flow propagation using NASA FIRMS data.
 
-## 🛠️ Installation
+## 🛠️ Installation Guide
 
-To make the installation process easy and cross-platform, we use **Pixi**. It handles Python and all geospatial dependencies automatically.
+We use **Pixi** to manage the environment. It automatically handles Python, complex geospatial dependencies (GIS), and all required libraries for Windows, macOS, and Linux.
 
 ### 1. Install Pixi
-First, you need to install the Pixi package manager. Open your terminal and paste the command for your OS:
+Open your terminal (macOS/Linux) or PowerShell (Windows) and paste the corresponding command:
 
+**Windows (PowerShell):**
+```powershell
+iwr -useb [https://pixi.sh/install.ps1](https://pixi.sh/install.ps1) | iex
+```
 **macOS / Linux:**
 ```bash
 curl -fsSL [https://pixi.sh/install.sh](https://pixi.sh/install.sh) | bash
 ```
 
-**Windows (PowerShell):**
+### 2. Setup the Project
+Clone this repository and enter the project folder:
+
 ```bash
-iwr -useb [https://pixi.sh/install.ps1](https://pixi.sh/install.ps1) | iex
+git clone https://github.com/Panch021/LavaFlow_Mapper_Suite.git
+cd LavaFlow_Mapper_Suite
 ```
