@@ -11,11 +11,15 @@ Open your terminal (macOS/Linux) or PowerShell (Windows) and paste the correspon
 
 **Windows (PowerShell):**
 ```powershell
-iwr -useb [https://pixi.sh/install.ps1](https://pixi.sh/install.ps1) | iex
+powershell -ExecutionPolicy Bypass -c "irm -useb https://pixi.sh/install.ps1 | iex"
 ```
 **macOS / Linux:**
 ```bash
-curl -fsSL [https://pixi.sh/install.sh](https://pixi.sh/install.sh) | bash
+curl -fsSL https://pixi.sh/install.sh | sh
+```
+Close and re-open PowerShell/terminal, then confirm:
+```bash
+pixi --version
 ```
 
 ### 2. Setup the Project
