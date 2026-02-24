@@ -15,8 +15,9 @@ First, you need to install the Pixi package manager. Open your terminal and past
 **macOS / Linux:**
 ```bash
 curl -fsSL [https://pixi.sh/install.sh](https://pixi.sh/install.sh) | bash ```
+```
 
 **Windows (PowerShell):**
 ```bash
 iwr -useb [https://pixi.sh/install.ps1](https://pixi.sh/install.ps1) | iex```
-
+```
