@@ -27,6 +27,8 @@ Clone this repository and enter the project folder:
 
 ```bash
 cd LavaFlow_Mapper_Suite
+```
+```bash
 git clone https://github.com/Panch021/LavaFlow_Mapper_Suite.git
 ```
 
