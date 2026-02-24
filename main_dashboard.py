@@ -280,7 +280,7 @@ def render_tab(tab, stats_data, mapper_data, speed_data):
             "No results yet. Click run to generate.")
         return html.Div([
             html.Button("RUN FRP STATISTICS", id="btn-run-stats", n_clicks=0,
-                        style={'padding': '10px 20px', 'backgroundColor': '#3498db', 'color': 'white', border: 'none',
+                        style={'padding': '10px 20px', 'backgroundColor': '#3498db', 'color': 'white', 'border': 'none',
                                'borderRadius': '5px', 'marginBottom': '20px'}),
             dcc.Loading(html.Div(id="out-stats-results", children=initial_content))
         ], style={'textAlign': 'center'})
