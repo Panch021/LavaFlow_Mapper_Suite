@@ -24,14 +24,12 @@ pixi --version
 
 ### 2. Setup the Project
 Clone this repository and enter the project folder:
-
-```bash
-cd LavaFlow_Mapper_Suite
-```
 ```bash
 git clone https://github.com/Panch021/LavaFlow_Mapper_Suite.git
 ```
-
+```bash
+cd LavaFlow_Mapper_Suite
+```
 ### 3. Run the Dashboard
 Since the project includes a pixi.toml file, you don't need to install dependencies manually. Just run this command and Pixi will set up everything and launch the app:
 
