@@ -32,7 +32,7 @@ Satellite thermal observations have become a cornerstone of modern volcano monit
 Originally developed to support volcanic crises in the Galápagos Islands and based on the methodology of [Vasconez et al. (2022)](https://doi.org/10.3390/rs14143483), the software has proven applicable to volcanic systems worldwide. By reducing technical barriers and integrating multiple workflows into a single application, `LavaFlow Mapper Suite` makes advanced satellite-based lava flow monitoring accessible to volcano observatories, civil protection agencies, researchers, students, and hazard managers.
 
 
-## 🛠️ Installation Guide
+## Installation Guide
 
 We use **Pixi** to manage the environment. It automatically handles Python, complex geospatial dependencies, and all required libraries for Windows, macOS, and Linux.
 
@@ -72,8 +72,7 @@ pixi run start
 <img width="6210" height="2605" alt="Abstract_a-01" src="https://github.com/user-attachments/assets/ca5ad3e0-a525-496f-b130-3b05bb679ba1" />
 
 * Animation of lava flow propagation during the March-May 2024 eruption of Fernandina Volcano (Galápagos) derived from VIIRS thermal anomaly data. Thermal anomalies are displayed chronologically to illustrate the spatial and temporal development of the active lava field. The accompanying plots show the evolution of Fire Radiative Power (FRP) and the maximum distance reached by the lava flow relative to the eruptive vent through time.
-https://github.com/user-attachments/assets/cdcec3b3-9905-435c-8148-094ed53d3a59
-
+[![Fernandina 2024 eruption - Video](https://github.com/user-attachments/assets/8113ca36-7fff-492d-87b6-f9558a7e7906)](https://github.com/user-attachments/assets/cdcec3b3-9905-435c-8148-094ed53d3a59)
 
 ## Acknowledgements
 The authors acknowledge the support of the Instituto Geofísico at Escuela Politécnica Nacional (Ecuador). This work was inspired by the Galápagos eruptions that occurred in 2022 and 2024 and developed as part of the monitoring efforts for active volcanism in Ecuador.
