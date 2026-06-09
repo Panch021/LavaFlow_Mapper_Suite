@@ -31,10 +31,6 @@ Satellite thermal observations have become a cornerstone of modern volcano monit
 
 Originally developed to support volcanic crises in the Galápagos Islands and based on the methodology of [Vasconez et al. (2022)] (https://doi.org/10.3390/rs14143483), the software has proven applicable to volcanic systems worldwide. By reducing technical barriers and integrating multiple workflows into a single application, `LavaFlow Mapper Suite` makes advanced satellite-based lava flow monitoring accessible to volcano observatories, civil protection agencies, researchers, students, and hazard managers.
 
-# Citations
-f you find LavaFlow Mapper useful in your research, please consider citing the following paper to support my work. Thank you for your support.
-
-* Vasconez FJ, Anzieta JC, Müller AV, et al (2022a) A Near Real-Time and Free Tool for the Preliminary Mapping of Active Lava Flows during Volcanic Crises: The Case of Hotspot Subaerial Eruptions. Remote Sensing 23. https://doi.org/https://doi.org/10.3390/rs14143483
 
 ## 🛠️ Installation Guide
 
@@ -71,8 +67,15 @@ Since the project includes a pixi.toml file, you don't need to install dependenc
 pixi run start
 ```
 
-# Examples
-
+## Examples
+* Comparison between thermal anomaly maps generated using all FIRMS thermal detections (left) and only those anomalies that satisfy the geolocation and Fire Radiative Power (FRP) filtering criteria implemented in LavaFlow Mapper Suite (right). The black polygon outlines the lava flow inundation area mapped by the Hawaiian Volcano Observatory (HVO) for the 2018 Lower East Rift Zone (LERZ) eruption of Kīlauea. The applied filters substantially reduce false detections and improve the spatial correspondence between satellite-derived thermal anomalies and the observed lava flow extent.
 <img width="6210" height="2605" alt="Abstract_a-01" src="https://github.com/user-attachments/assets/ca5ad3e0-a525-496f-b130-3b05bb679ba1" />
 
+## Acknowledgements
+The authors acknowledge the support of the Instituto Geofísico at Escuela Politécnica Nacional (Ecuador). This work was inspired by the Galápagos eruptions that occurred in 2022 and 2024 and developed as part of the monitoring efforts for active volcanism in Ecuador.
 
+
+## Citations
+If you find LavaFlow Mapper useful in your research, please consider citing the following paper to support my work. Thank you for your support.
+
+* Vasconez FJ, Anzieta JC, Müller AV, et al (2022a) A Near Real-Time and Free Tool for the Preliminary Mapping of Active Lava Flows during Volcanic Crises: The Case of Hotspot Subaerial Eruptions. Remote Sensing 23. https://doi.org/https://doi.org/10.3390/rs14143483
