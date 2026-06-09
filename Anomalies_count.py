@@ -12,24 +12,34 @@ from datetime import datetime, date
 # ==========================================
 
 def get_active_folder():
-    """Reads the current volcano name and sanitizes it for folder paths."""
+    """
+    Returns the full relative folder path of the active project
+    (e.g. 'projects/Wolf_2022' or 'examples/Sangay_2023').
+    Works with both the new path-based active_volcano.txt and legacy name-only entries.
+    """
     if os.path.exists("active_volcano.txt"):
         with open("active_volcano.txt", "r") as f:
-            vol_name = f.read().strip()
-            return vol_name.replace(" ", "_")
+            path = f.read().strip()
+        if os.path.isdir(path):
+            return path          # new format: full relative path
+        # Legacy fallback: treat as bare folder name in root
+        legacy = path.replace(" ", "_")
+        if os.path.isdir(legacy):
+            return legacy
     return None
 
 
 def load_global_config():
     """Load configuration parameters from the active volcano subfolder."""
     folder = get_active_folder()
-    config_path = "config.txt"
-    if folder:
-        specific_path = os.path.join(folder, f"config_{folder}.txt")
-        if os.path.exists(specific_path): config_path = specific_path
+    if not folder:
+        return {}
+    folder_name = os.path.basename(folder)          # e.g. 'Wolf_2022'
+    config_path = os.path.join(folder, f"config_{folder_name}.txt")
 
     config = {}
-    if not os.path.exists(config_path): return config
+    if not os.path.exists(config_path):
+        return config
     with open(config_path, "r") as f:
         for line in f:
             line = line.strip()
@@ -43,28 +53,47 @@ def load_historical_data():
     """Consolidated loader for sensor files in the specific volcano folder."""
     folder = get_active_folder()
     if not folder: return pd.DataFrame()
+    folder_name = os.path.basename(folder)   # e.g. 'Sangay' not 'projects/Sangay'
     files = {
-        'MODIS (AQUA/TERRA)': f'historical_MODIS_NRT_{folder}.csv',
-        'VIIRS (SNPP)': f'historical_VIIRS_SNPP_NRT_{folder}.csv',
-        'VIIRS (NOAA-20)': f'historical_VIIRS_NOAA20_NRT_{folder}.csv',
-        'VIIRS (NOAA-21)': f'historical_VIIRS_NOAA21_NRT_{folder}.csv'
+        'MODIS (AQUA/TERRA)': f'historical_MODIS_NRT_{folder_name}.csv',
+        'VIIRS (SNPP)': f'historical_VIIRS_SNPP_NRT_{folder_name}.csv',
+        'VIIRS (NOAA-20)': f'historical_VIIRS_NOAA20_NRT_{folder_name}.csv',
+        'VIIRS (NOAA-21)': f'historical_VIIRS_NOAA21_NRT_{folder_name}.csv'
     }
     all_dfs = []
     for label, filename in files.items():
         file_path = os.path.join(folder, filename)
         if os.path.exists(file_path):
-            df = pd.read_csv(file_path)
-            df['acq_date'] = pd.to_datetime(df['acq_date'], format='%d/%m/%Y', errors='coerce')
-            df['source'] = label
-            all_dfs.append(df[['acq_date', 'source', 'frp']])
+            try:
+                try:
+                    df = pd.read_csv(file_path, encoding='utf-8')
+                except UnicodeDecodeError:
+                    df = pd.read_csv(file_path, encoding='latin-1')
+
+                # Robust multi-format date parser — handles:
+                # YYYY-MM-DD (ISO, current standard)
+                # DD/MM/YYYY (legacy full)
+                # D/M/YY, DD/M/YY, D/M/YYYY (NASA API short formats)
+                parsed = pd.to_datetime(df['acq_date'], format='%Y-%m-%d', errors='coerce')
+                if parsed.isna().all():
+                    parsed = pd.to_datetime(df['acq_date'], format='%d/%m/%Y', errors='coerce')
+                if parsed.isna().all():
+                    parsed = pd.to_datetime(df['acq_date'], dayfirst=True, errors='coerce')
+                df['acq_date'] = parsed
+
+                df['source'] = label
+                all_dfs.append(df[['acq_date', 'source', 'frp']])
+            except Exception:
+                continue
     return pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
 
 
 def compute_summary_stats(df, start_dt, end_dt, week_day):
     """
     Computes summary statistics for the sidebar panel:
-    - Total anomalies on the last day with data
-    - Total and peak anomalies for the last week and last month in the range
+    - Total anomalies on the last day WITH data (unchanged)
+    - Total anomalies for the week containing end_dt (0 if no data that week)
+    - Total anomalies for the month containing end_dt (0 if no data that month)
     - Peak week and peak month totals across the full analysis period
     """
     if df.empty:
@@ -76,20 +105,21 @@ def compute_summary_stats(df, start_dt, end_dt, week_day):
 
     last_day = df_range['acq_date'].max()
 
-    # --- Last day ---
+    # --- Last day with data (unchanged) ---
     total_last_day = int((df_range['acq_date'] == last_day).sum())
 
-    # --- Last week: the complete week block containing last_day ---
-    # Align last_day to the start of its week using the selected week_day
-    days_since_start = (last_day.dayofweek - week_day) % 7
-    last_week_start = last_day - pd.Timedelta(days=int(days_since_start))
+    # --- Last week: week that CONTAINS end_dt, anchored to week_day ---
+    # Returns 0 if there are no detections during that week
+    days_since_start = (end_dt.dayofweek - week_day) % 7
+    last_week_start = end_dt - pd.Timedelta(days=int(days_since_start))
     last_week_end = last_week_start + pd.Timedelta(days=6)
     mask_last_week = (df_range['acq_date'] >= last_week_start) & (df_range['acq_date'] <= last_week_end)
     total_last_week = int(mask_last_week.sum())
 
-    # --- Last month: calendar month of last_day ---
-    last_month_start = last_day.replace(day=1)
-    last_month_end = (last_month_start + pd.offsets.MonthEnd(1))
+    # --- Last month: calendar month that CONTAINS end_dt ---
+    # Returns 0 if there are no detections during that month
+    last_month_start = end_dt.replace(day=1)
+    last_month_end = last_month_start + pd.offsets.MonthEnd(1)
     mask_last_month = (df_range['acq_date'] >= last_month_start) & (df_range['acq_date'] <= last_month_end)
     total_last_month = int(mask_last_month.sum())
 
@@ -113,7 +143,7 @@ def compute_summary_stats(df, start_dt, end_dt, week_day):
         'last_week_start': last_week_start.strftime('%d/%m/%Y'),
         'last_week_end': last_week_end.strftime('%d/%m/%Y'),
         'total_last_week': total_last_week,
-        'last_month': last_day.strftime('%B %Y'),
+        'last_month': end_dt.strftime('%B %Y'),
         'total_last_month': total_last_month,
         'peak_week': peak_week,
         'peak_month': peak_month,
@@ -176,6 +206,27 @@ def build_stats_panel(stats):
 def get_layout(start_date=None, end_date=None):
     cfg = load_global_config()
     volcano = cfg.get('volcano', 'Volcano Name')
+
+    folder = get_active_folder()
+    if not folder:
+        return html.Div("⚠️ No active project found. Please configure a volcano first.",
+                        style={'textAlign': 'center', 'padding': '20px', 'color': '#e74c3c'})
+
+    folder_name = os.path.basename(folder)   # e.g. 'Sangay' not 'projects/Sangay'
+    sat_files = [
+        f'historical_VIIRS_SNPP_NRT_{folder_name}.csv',
+        f'historical_VIIRS_NOAA20_NRT_{folder_name}.csv',
+        f'historical_VIIRS_NOAA21_NRT_{folder_name}.csv',
+        f'historical_MODIS_NRT_{folder_name}.csv',
+    ]
+    if not any(os.path.exists(os.path.join(folder, f)) for f in sat_files):
+        return html.Div([
+            html.P("⚠️ No satellite data found.",
+                   style={'color': '#e74c3c', 'fontWeight': 'bold', 'fontSize': '16px'}),
+            html.P("Please run 🛰️ FIRMS Download (Tab 1) first to download satellite data.",
+                   style={'color': '#7f8c8d'})
+        ], style={'textAlign': 'center', 'padding': '40px'})
+
     if start_date is None: start_date = datetime(2026, 1, 1)
     if end_date is None: end_date = datetime(2026, 5, 1)
 
