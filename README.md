@@ -74,6 +74,7 @@ pixi run start
 * Animation of lava flow propagation during the March-May 2024 eruption of Fernandina Volcano (Galápagos) derived from VIIRS thermal anomaly data. Thermal anomalies are displayed chronologically to illustrate the spatial and temporal development of the active lava field. The accompanying plots show the evolution of Fire Radiative Power (FRP) and the maximum distance reached by the lava flow relative to the eruptive vent through time.
 [![Fernandina 2024 eruption - Video](https://github.com/user-attachments/assets/8113ca36-7fff-492d-87b6-f9558a7e7906)](https://github.com/user-attachments/assets/cdcec3b3-9905-435c-8148-094ed53d3a59)
 
+<p align="center"><i> Click on the image to play the video.</i></p>
 
 ## Citations
 If you find LavaFlow Mapper useful in your research, please consider citing the following paper to support my work. Thank you for your support.
