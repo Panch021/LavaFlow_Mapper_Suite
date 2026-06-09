@@ -50,6 +50,19 @@ Unlike existing thermal monitoring platforms such as [MODVOLC](http://modis.higp
 
 Originally developed to support rapid lava flow mapping during eruptions in the Galápagos Islands, the methodology has since demonstrated its applicability to diverse volcanic settings worldwide [e.g., @Vasconez2022a; @Ramayanti2025]. The primary users of `LavaFlow Mapper Suite` include volcano observatories, civil protection agencies, emergency managers, researchers, and students involved in volcanic hazard assessment and eruption monitoring. While existing thermal monitoring dataset require advanced expertise in remote sensing, programming, or GIS to transform raw observations into actionable products, thermal monitoring platforms offer limited flexibility for user-defined analyses, retrospective studies, or rapid generation of standardized outputs. `LavaFlow Mapper Suite` addresses this gap by integrating data retrieval, filtering, visualization, analysis, and reporting within a single graphical user interface, enabling users with varying levels of technical expertise to rapidly generate meaningful information from thermal satellite observations. This capability is particularly valuable for institutions with limited resources, where access to specialized personnel, airborne surveys, or dedicated remote-sensing workflows may be constrained. By automating complex geospatial processes and reducing technical barriers, the software democratizes access to advanced satellite-based volcanic monitoring techniques and facilitates their adoption by the broader hazard assessment and volcanological communities.
 
+# Availability
+
+LavaFlow Mapper Suite is freely available and open-source. It can be downloaded from the GitHub repository
+available at https://github.com/Panch021/LavaFlow_Mapper_Suite.
+
+# AI Usage Disclosure
+
+Generative AI tools were used to assist in specific aspects of software development and manuscript preparation. The scientific methodology, software design, implementation strategy, validation, testing, and all volcanological analyses were conceived, developed, and verified by the author.
+
+AI-assisted tools were used to support the translation of selected code components from R to Python and to facilitate the integration of multiple independent modules into a unified graphical user interface (GUI). All AI-generated code suggestions underwent extensive manual review, modification, testing, debugging, and validation prior to inclusion in the final software package.
+
+Additionally, generative AI was used to assist with improving the clarity, grammar, and readability of the manuscript. As the author is not a native English speaker, AI-assisted editing was employed to refine the writing and presentation of the text. All AI-assisted content was carefully reviewed, revised, and approved by the author, who assumes full responsibility for the accuracy, integrity, and originality of both the software and the manuscript.
+
 # Acknowledgements
 
 The authors acknowledge the support of the Instituto Geofísico at Escuela Politécnica Nacional (Ecuador). This work was inspired by the Galápagos eruptions that occurred in 2022 and 2024 and developed as part of the monitoring efforts for active volcanism in Ecuador.
