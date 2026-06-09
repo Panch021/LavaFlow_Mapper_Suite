@@ -1,10 +1,10 @@
 # 🌋 LavaFlow Mapper Suite
 
-An integrated Python suite for monitoring volcanic thermal anomalies and lava flow propagation using NASA FIRMS data.
+An integrated Python suite for monitoring lava flow propagation in near-real-time using thermal anomalies detected and distributed by FIRMS/NASA.
 
 ## 🛠️ Installation Guide
 
-We use **Pixi** to manage the environment. It automatically handles Python, complex geospatial dependencies (GIS), and all required libraries for Windows, macOS, and Linux.
+We use **Pixi** to manage the environment. It automatically handles Python, complex geospatial dependencies, and all required libraries for Windows, macOS, and Linux.
 
 ### 1. Install Pixi
 Open your terminal (macOS/Linux) or PowerShell (Windows) and paste the corresponding command:
