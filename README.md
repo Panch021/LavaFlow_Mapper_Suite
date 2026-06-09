@@ -2,7 +2,7 @@
 
 ## Overview
 
-`LavaFlow Mapper Suite` is an open-source Python application for the near-real-time mapping and monitoring of active lava flows using thermal satellite data from NASA FIRMS (VIIRS and MODIS). The software integrates data retrieval, processing, visualization, and reporting tools into a single graphical user interface (GUI), enabling users to rapidly assess lava flow propagation during volcanic eruptions.
+`LavaFlow Mapper Suite` is an open-source Python application for the near-real-time mapping and monitoring of active lava flows using thermal satellite data from [NASA/FIRMS](https://firms.modaps.eosdis.nasa.gov/download/) (VIIRS and MODIS sensors). The software integrates data retrieval, processing, visualization, and reporting tools into a single graphical user interface (GUI), enabling users to rapidly assess lava flow propagation during volcanic eruptions.
 
 Built upon the methodology of [Vasconez et al. (2022)](https://doi.org/10.3390/rs14143483), the suite automatically downloads thermal anomaly data, applies customizable filtering criteria, and generates interactive maps, time-series analyses, propagation animations, and lava flow velocity estimates. These products provide valuable information on lava flow inundation, eruption chronology, active flow fields, propagation rates, and maximum runout distances.
 
@@ -10,8 +10,8 @@ The software is designed for volcano observatories, civil protection agencies, r
 
 ### Main Features
 
-* 🌋 Volcano selection from the Global Volcanism Program (GVP) database
-* 🛰️ Automated download of VIIRS and MODIS thermal anomaly data from NASA-FIRMS using an API key
+* 🌋 Volcano selection from the Global Volcanism Program [(GVP)](https://volcano.si.edu/volcanolist_holocene.cfm) database
+* 🛰️ Automated download of VIIRS and MODIS thermal anomaly data from NASA/FIRMS using a personal [API key](https://firms.modaps.eosdis.nasa.gov/api/map_key/)
 * 📈 Weekly and monthly thermal anomaly statistics
 * 🔥 Fire Radiative Power (FRP) threshold analysis
 * 🗺️ Interactive mapping of active lava flows
@@ -27,7 +27,7 @@ Rapid mapping of active lava flows is essential during volcanic crises to suppor
 
 Satellite thermal observations have become a cornerstone of modern volcano monitoring, providing frequent, repeatable, and globally available measurements of volcanic activity. In particular, the VIIRS and MODIS sensors provide near-real-time thermal anomaly detections that can be used to track active lava flows. Despite the availability of these datasets, transforming raw thermal anomaly records into operational mapping products often requires expertise in remote sensing, GIS, and programming, creating a barrier for many users.
 
-`LavaFlow Mapper Suite` addresses this challenge by providing an integrated graphical interface that automates the retrieval, processing, visualization, and analysis of thermal anomaly data from NASA's Fire Information for Resource Management System (FIRMS). The software generates interactive lava flow maps, temporal analyses, propagation animations, velocity estimates, and shareable reports, allowing users to rapidly transform satellite observations into actionable information.
+`LavaFlow Mapper Suite` addresses this challenge by providing an integrated graphical interface that automates the retrieval, processing, visualization, and analysis of thermal anomaly data from NASA's Fire Information for Resource Management System [(FIRMS)](https://firms.modaps.eosdis.nasa.gov/). The software generates interactive lava flow maps, temporal analyses, propagation animations, velocity estimates, and shareable reports, allowing users to rapidly transform satellite observations into actionable information.
 
 Originally developed to support volcanic crises in the Galápagos Islands and based on the methodology of [Vasconez et al. (2022)](https://doi.org/10.3390/rs14143483), the software has proven applicable to volcanic systems worldwide. By reducing technical barriers and integrating multiple workflows into a single application, `LavaFlow Mapper Suite` makes advanced satellite-based lava flow monitoring accessible to volcano observatories, civil protection agencies, researchers, students, and hazard managers.
 
@@ -68,10 +68,10 @@ pixi run start
 ```
 
 ## Examples
-* Comparison between thermal anomaly maps generated using all FIRMS thermal detections (left) and only those anomalies that satisfy the geolocation and Fire Radiative Power (FRP) filtering criteria implemented in LavaFlow Mapper Suite (right). The black polygon outlines the lava flow inundation area mapped by the Hawaiian Volcano Observatory (HVO) for the 2018 Lower East Rift Zone (LERZ) eruption of Kīlauea. The applied filters substantially reduce false detections and improve the spatial correspondence between satellite-derived thermal anomalies and the observed lava flow extent.
+* Comparison between thermal anomaly maps generated using all FIRMS thermal detections (left) and only those anomalies that satisfy the geolocation and Fire Radiative Power (FRP) filtering criteria implemented in LavaFlow Mapper Suite (right). The black polygon outlines the lava flow inundation area mapped by the Hawaiian Volcano Observatory for the 2018 Lower East Rift Zone (LERZ) eruption of Kīlauea [(Zoeller et al. 2020)](https://www.sciencebase.gov/catalog/item/5eba3f6082ce25b5135d5b85). The applied filters substantially reduce false detections and improve the spatial correspondence between satellite-derived thermal anomalies and the observed lava flow extent.
 <img width="6210" height="2605" alt="Abstract_a-01" src="https://github.com/user-attachments/assets/ca5ad3e0-a525-496f-b130-3b05bb679ba1" />
 
-* Animation of lava flow propagation during the March-May 2024 eruption of Fernandina Volcano (Galápagos) derived from VIIRS thermal anomaly data. Thermal anomalies are displayed chronologically to illustrate the spatial and temporal development of the active lava field. The accompanying plots show the evolution of Fire Radiative Power (FRP) and the maximum distance reached by the lava flow relative to the eruptive vent through time.
+* Animation of lava flow propagation during the March-May 2024 eruption of Fernandina volcano (Galápagos) derived from VIIRS thermal anomaly data. Thermal anomalies are displayed chronologically to illustrate the spatial and temporal development of the active lava field. The accompanying plots show the evolution of Fire Radiative Power (FRP) and the maximum distance reached by the lava flow relative to the eruptive vent through time.
 [![Fernandina 2024 eruption - Video](https://github.com/user-attachments/assets/8113ca36-7fff-492d-87b6-f9558a7e7906)](https://github.com/user-attachments/assets/cdcec3b3-9905-435c-8148-094ed53d3a59)
 
 <p align="center"><i> Click on the image to play the video.</i></p>
