@@ -67,7 +67,7 @@ Since the project includes a pixi.toml file, you don't need to install dependenc
 pixi run start
 ```
 
-### **For conda users:
+### **For Conda users:
 ```bash
 1. conda --version
 2. git clone https://github.com/Panch021/LavaFlow_Mapper_Suite.git
