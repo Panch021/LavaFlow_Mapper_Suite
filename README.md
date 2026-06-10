@@ -34,7 +34,7 @@ Originally developed to support volcanic crises in the Galápagos Islands and ba
 
 ## Installation Guide
 
-We use **Pixi** to manage the environment. It automatically handles Python, complex geospatial dependencies, and all required libraries for Windows, macOS, and Linux.
+We recommend using **Pixi** to manage the environment, as it automatically handles Python, complex geospatial dependencies, and all required libraries across Windows, macOS, and Linux. However, the users can also utilice Conda if they prefer.
 
 ### 1. Install Pixi
 Open your terminal (macOS/Linux) or PowerShell (Windows) and paste the corresponding command:
@@ -65,6 +65,16 @@ Since the project includes a pixi.toml file, you don't need to install dependenc
 
 ```bash
 pixi run start
+```
+
+### **For conda users:
+```bash
+1. conda --version
+2. git clone https://github.com/Panch021/LavaFlow_Mapper_Suite.git
+3. cd LavaFlow_Mapper_Suite
+4. conda env create -f environment.yml
+5. conda activate lavaflow_mapper
+6. python lavaflow_mapper_suite.py
 ```
 
 ## Examples
