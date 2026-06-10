@@ -16,7 +16,6 @@ def get_active_folder():
     """
     Returns the full relative folder path of the active project
     (e.g. 'projects/Wolf_2022' or 'examples/Sangay_2023').
-    Works with both the new path-based active_volcano.txt and legacy name-only entries.
     """
     if os.path.exists("active_volcano.txt"):
         with open("active_volcano.txt", "r") as f:
@@ -66,7 +65,6 @@ def parse_waypoints_from_config(c):
       - Legacy single-waypoint format: wpt_names=Foo, wpt_lats=1.0, ...
       - New multi-waypoint format:    wpt_names=Foo;Bar, wpt_lats=1.0;2.0, ...
     Returns a list of dicts {name, lat, lon, symbol}.
-    Returns an empty list if no valid waypoints are found.
     """
     def _as_list(v):
         if isinstance(v, str):
@@ -106,11 +104,7 @@ def parse_waypoints_from_config(c):
 # ==========================================
 
 def compute_anomaly_stats(df, start_dt, end_dt, week_day=3):
-    """
-    Computes period summary stats matching the Anomalies_count sidebar panel.
-    Last week and last month are anchored to end_dt (global config),
-    so they return 0 if there are no detections in that window.
-    """
+    """Computes period summary stats matching the Anomalies_count sidebar panel."""
     df_range = df[(df['acq_date'] >= start_dt) & (df['acq_date'] <= end_dt)].copy()
     if df_range.empty:
         return {}
@@ -150,40 +144,35 @@ def compute_anomaly_stats(df, start_dt, end_dt, week_day=3):
 
 
 def build_anomaly_stats_html(stats):
-    """Renders period summary stats as an HTML block for embedding in the report."""
+    """Renders period summary stats as a class-based responsive HTML block."""
     if not stats:
         return ""
     return f"""
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px;margin-bottom:8px;">
-        <div style="flex:1;min-width:140px;padding:10px 14px;background:#f0f4f8;
-                    border:1px solid #dde;border-radius:6px;">
-            <div style="font-size:11px;color:#7f8c8d;">Last day with data</div>
-            <div style="font-size:22px;font-weight:bold;color:#2c3e50;">{stats['total_last_day']}</div>
-            <div style="font-size:11px;color:#95a5a6;">{stats['last_day']}</div>
+    <div class="stats-grid">
+        <div class="stat-box">
+            <div class="stat-label">Last day with data</div>
+            <div class="stat-value">{stats['total_last_day']}</div>
+            <div class="stat-meta">{stats['last_day']}</div>
         </div>
-        <div style="flex:1;min-width:140px;padding:10px 14px;background:#f0f4f8;
-                    border:1px solid #dde;border-radius:6px;">
-            <div style="font-size:11px;color:#7f8c8d;">Last week (all sensors)</div>
-            <div style="font-size:22px;font-weight:bold;color:#2c3e50;">{stats['total_last_week']}</div>
-            <div style="font-size:11px;color:#95a5a6;">{stats['last_week_start']} – {stats['last_week_end']}</div>
+        <div class="stat-box">
+            <div class="stat-label">Last week (all sensors)</div>
+            <div class="stat-value">{stats['total_last_week']}</div>
+            <div class="stat-meta">{stats['last_week_start']} – {stats['last_week_end']}</div>
         </div>
-        <div style="flex:1;min-width:140px;padding:10px 14px;background:#f0f4f8;
-                    border:1px solid #dde;border-radius:6px;">
-            <div style="font-size:11px;color:#7f8c8d;">Last month (all sensors)</div>
-            <div style="font-size:22px;font-weight:bold;color:#2c3e50;">{stats['total_last_month']}</div>
-            <div style="font-size:11px;color:#95a5a6;">{stats['last_month']}</div>
+        <div class="stat-box">
+            <div class="stat-label">Last month (all sensors)</div>
+            <div class="stat-value">{stats['total_last_month']}</div>
+            <div class="stat-meta">{stats['last_month']}</div>
         </div>
-        <div style="flex:1;min-width:140px;padding:10px 14px;background:#f0f4f8;
-                    border:1px solid #dde;border-radius:6px;">
-            <div style="font-size:11px;color:#7f8c8d;">Peak week in period</div>
-            <div style="font-size:22px;font-weight:bold;color:#e74c3c;">{stats['peak_week']}</div>
-            <div style="font-size:11px;color:#95a5a6;">anomalies</div>
+        <div class="stat-box">
+            <div class="stat-label">Peak week in period</div>
+            <div class="stat-value stat-value--alert">{stats['peak_week']}</div>
+            <div class="stat-meta">anomalies</div>
         </div>
-        <div style="flex:1;min-width:140px;padding:10px 14px;background:#f0f4f8;
-                    border:1px solid #dde;border-radius:6px;">
-            <div style="font-size:11px;color:#7f8c8d;">Peak month in period</div>
-            <div style="font-size:22px;font-weight:bold;color:#e74c3c;">{stats['peak_month']}</div>
-            <div style="font-size:11px;color:#95a5a6;">anomalies</div>
+        <div class="stat-box">
+            <div class="stat-label">Peak month in period</div>
+            <div class="stat-value stat-value--alert">{stats['peak_month']}</div>
+            <div class="stat-meta">anomalies</div>
         </div>
     </div>"""
 
@@ -274,7 +263,7 @@ def build_anomalies_figure(folder, cfg):
                      dtick="M1" if diff_days <= 730 else "M3", tickformat="%b %Y", ticklabelmode="period")
     fig.update_yaxes(title_text="Weekly anomalies", row=1, col=1)
     fig.update_yaxes(title_text="Monthly anomalies", row=2, col=1)
-    fig.update_layout(barmode='stack', template="plotly_white", height=700,
+    fig.update_layout(barmode='stack', template="plotly_white", height=700, autosize=True,
                       title=dict(text=f"Thermal Anomalies — {cfg.get('volcano', folder)}", x=0.5),
                       legend=dict(orientation="h", y=-0.12, xanchor="center", x=0.5))
 
@@ -315,7 +304,7 @@ def build_mapper_figure(folder, cfg):
                                      marker=dict(color=color, size=6), showlegend=False,
                                      hovertemplate="Date: %{x|%d/%m/%Y}<br>Distance: %{y:.2f} km<extra></extra>"), row=2, col=1)
 
-    fig.update_layout(template="plotly_white", height=600,
+    fig.update_layout(template="plotly_white", height=600, autosize=True,
                       title=dict(text=f"FIRMS Thermal Anomalies — {volcano}<br>{s_label} – {e_label}", x=0.5),
                       legend=dict(orientation="h", y=-0.15, xanchor="left", x=0))
     fig.update_yaxes(title_text="FRP (MW)", row=1, col=1)
@@ -331,30 +320,24 @@ def build_mapper_figure(folder, cfg):
     dist_max  = df['distance_km'].max()
 
     stats_html = f"""
-    <div style="margin-bottom:20px;">
-        <div style="font-weight:bold;font-size:14px;color:#2c3e50;margin-bottom:10px;">
-            📊 Period Summary (all satellites)
-        </div>
-        <div style="display:flex;gap:12px;flex-wrap:wrap;">
-            <div style="flex:1;min-width:160px;padding:14px 18px;border-radius:8px;
-                        background:#f0f4f8;border:2px solid #2980b9;text-align:center;">
-                <div style="font-size:11px;color:#7f8c8d;margin-bottom:4px;">Mean FRP</div>
-                <div style="font-size:22px;font-weight:bold;color:#2980b9;">{frp_mean:.1f} MW</div>
+    <div class="stats-section">
+        <div class="stats-title">📊 Period Summary (all satellites)</div>
+        <div class="stats-grid">
+            <div class="stat-box stat-box--outlined">
+                <div class="stat-label">Mean FRP</div>
+                <div class="stat-value stat-value--accent">{frp_mean:.1f} MW</div>
             </div>
-            <div style="flex:1;min-width:160px;padding:14px 18px;border-radius:8px;
-                        background:#f0f4f8;border:2px solid #2980b9;text-align:center;">
-                <div style="font-size:11px;color:#7f8c8d;margin-bottom:4px;">Max FRP</div>
-                <div style="font-size:22px;font-weight:bold;color:#2980b9;">{frp_max:.1f} MW</div>
+            <div class="stat-box stat-box--outlined">
+                <div class="stat-label">Max FRP</div>
+                <div class="stat-value stat-value--accent">{frp_max:.1f} MW</div>
             </div>
-            <div style="flex:1;min-width:160px;padding:14px 18px;border-radius:8px;
-                        background:#f0f4f8;border:2px solid #2980b9;text-align:center;">
-                <div style="font-size:11px;color:#7f8c8d;margin-bottom:4px;">Mean Distance</div>
-                <div style="font-size:22px;font-weight:bold;color:#2980b9;">{dist_mean:.2f} km</div>
+            <div class="stat-box stat-box--outlined">
+                <div class="stat-label">Mean Distance</div>
+                <div class="stat-value stat-value--accent">{dist_mean:.2f} km</div>
             </div>
-            <div style="flex:1;min-width:160px;padding:14px 18px;border-radius:8px;
-                        background:#f0f4f8;border:2px solid #2980b9;text-align:center;">
-                <div style="font-size:11px;color:#7f8c8d;margin-bottom:4px;">Max Distance</div>
-                <div style="font-size:22px;font-weight:bold;color:#2980b9;">{dist_max:.2f} km</div>
+            <div class="stat-box stat-box--outlined">
+                <div class="stat-label">Max Distance</div>
+                <div class="stat-value stat-value--accent">{dist_max:.2f} km</div>
             </div>
         </div>
     </div>"""
@@ -378,7 +361,7 @@ def build_speed_figure(folder, cfg):
     fig.add_trace(go.Scatter(x=df['date'], y=df['speed'], name="Prop. Speed",
                               mode='lines+markers', line=dict(color='red', width=2, dash='dot'),
                               marker=dict(size=7, symbol='diamond')), secondary_y=True)
-    fig.update_layout(template="plotly_white", height=500,
+    fig.update_layout(template="plotly_white", height=500, autosize=True,
                       title=dict(text=f"Lava Flow Propagation Speed — {volcano}", x=0.5),
                       legend=dict(orientation="h", y=-0.2, xanchor="center", x=0.5))
     fig.update_yaxes(title_text="Maximum Distance (km)", secondary_y=False)
@@ -390,21 +373,18 @@ def build_speed_figure(folder, cfg):
     mean_speed = speed_valid.mean() if not speed_valid.empty else 0
 
     stats_html = f"""
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
-        <div style="flex:1;min-width:160px;padding:10px 14px;background:#f0f4f8;
-                    border:1px solid #dde;border-radius:8px;">
-            <div style="font-size:11px;color:#7f8c8d;">Max. Lava Flow Distance</div>
-            <div style="font-size:22px;font-weight:bold;color:#2c3e50;">{max_dist:.2f} km</div>
+    <div class="stats-grid">
+        <div class="stat-box">
+            <div class="stat-label">Max. Lava Flow Distance</div>
+            <div class="stat-value">{max_dist:.2f} km</div>
         </div>
-        <div style="flex:1;min-width:160px;padding:10px 14px;background:#eaf4fb;
-                    border:2px solid #e74c3c;border-radius:8px;">
-            <div style="font-size:11px;color:#7f8c8d;">Max. Propagation Speed</div>
-            <div style="font-size:22px;font-weight:bold;color:#e74c3c;">{max_speed:.1f} m/h</div>
+        <div class="stat-box stat-box--alert">
+            <div class="stat-label">Max. Propagation Speed</div>
+            <div class="stat-value stat-value--alert">{max_speed:.1f} m/h</div>
         </div>
-        <div style="flex:1;min-width:160px;padding:10px 14px;background:#eaf4fb;
-                    border:2px solid #e74c3c;border-radius:8px;">
-            <div style="font-size:11px;color:#7f8c8d;">Mean Propagation Speed</div>
-            <div style="font-size:22px;font-weight:bold;color:#e74c3c;">{mean_speed:.1f} m/h</div>
+        <div class="stat-box stat-box--alert">
+            <div class="stat-label">Mean Propagation Speed</div>
+            <div class="stat-value stat-value--alert">{mean_speed:.1f} m/h</div>
         </div>
     </div>"""
     return fig, stats_html
@@ -442,12 +422,7 @@ def build_vertical_colorbar(start_dt, end_dt, n_ticks=6):
 
 
 def build_lock_zoom_script():
-    """
-    Returns a <script> block that adds a Leaflet control button at the
-    bottom-right of the folium map. Toggles scrollWheelZoom, doubleClickZoom,
-    touchZoom and boxZoom. Uses margin-bottom: 380px to sit well above
-    the bottom edge.
-    """
+    """Lock-zoom Leaflet control button (bottom-right corner)."""
     return """
     <script>
     (function() {
@@ -509,25 +484,19 @@ def build_lock_zoom_script():
 
 
 def add_waypoint_marker_with_label(feature_group, lat, lon, name, symbol):
-    """
-    Adds a waypoint marker plus a permanent label showing its name.
-    Implemented with folium.Tooltip(..., permanent=True) so the label is
-    always visible on the map (not only on hover).
-    """
+    """Adds a waypoint marker plus a permanent label showing its name."""
     import folium
     try:
         from folium.plugins import RegularPolygonMarker
     except ImportError:
         from folium.features import RegularPolygonMarker
 
-    # Permanent label tooltip: always visible, positioned to the right of the marker
     label = folium.Tooltip(
         name or "Waypoint",
         permanent=True,
         direction='right',
         offset=(8, 0),
         sticky=False,
-        # Inline style so the label has a clean white background with a subtle shadow
         opacity=0.95
     ) if name else folium.Tooltip(name or "Waypoint")
 
@@ -543,7 +512,7 @@ def add_waypoint_marker_with_label(feature_group, lat, lon, name, symbol):
             color='black', fill=True, fill_opacity=1.0,
             tooltip=label
         ).add_to(feature_group)
-    else:  # square or any other symbol falls back to a square
+    else:
         RegularPolygonMarker(
             [lat, lon], number_of_sides=4, radius=7, rotation=45,
             color='black', fill=True, fill_opacity=1.0,
@@ -583,7 +552,6 @@ def build_folium_map(folder, cfg):
 
     m = folium.Map(location=[LATS, LONS], zoom_start=zoom, control_scale=True, tiles=None)
 
-    # Reposition scale bar + style the permanent waypoint labels for readability
     custom_css = """
     <style>
         .leaflet-control-scale {
@@ -593,7 +561,6 @@ def build_folium_map(folder, cfg):
             z-index: 9999 !important;
             visibility: visible !important;
         }
-        /* Permanent waypoint labels: clean white pill with subtle shadow */
         .leaflet-tooltip.leaflet-tooltip-right {
             background-color: rgba(255, 255, 255, 0.95);
             border: 1px solid #555;
@@ -633,7 +600,6 @@ def build_folium_map(folder, cfg):
         ).add_to(fg_anomalies)
     fg_anomalies.add_to(m)
 
-    # Shapefile layer
     if cfg.get('include_shapefile') and cfg.get('shapefile_path'):
         shp_name = str(cfg.get('shapefile_path'))
         if not shp_name.lower().endswith(".shp"):
@@ -650,7 +616,6 @@ def build_folium_map(folder, cfg):
             except Exception:
                 pass
 
-    # Reference radius circle
     if cfg.get('include_reference_radius'):
         fg_rad = folium.FeatureGroup(name='Reference Radius')
         folium.Circle(
@@ -659,7 +624,6 @@ def build_folium_map(folder, cfg):
         ).add_to(fg_rad)
         fg_rad.add_to(m)
 
-    # --- MULTI-WAYPOINT PLOTTING with permanent name labels ---
     waypoints = parse_waypoints_from_config(cfg) if cfg.get('include_reference_waypoint') else []
     if waypoints:
         fg_wpts = folium.FeatureGroup(name="Reference Waypoints")
@@ -671,7 +635,6 @@ def build_folium_map(folder, cfg):
             )
         fg_wpts.add_to(m)
 
-    # Vent marker
     folium.Marker(
         [LATS, LONS],
         icon=folium.DivIcon(
@@ -684,7 +647,6 @@ def build_folium_map(folder, cfg):
 
     folium.LayerControl(collapsed=False).add_to(m)
 
-    # --- AUTO-FIT MAP BOUNDS TO DATA EXTENT ---
     lats = list(df['latitude'].values) + [LATS]
     lons = list(df['longitude'].values) + [LONS]
 
@@ -695,7 +657,6 @@ def build_folium_map(folder, cfg):
         lats += [LATS - dlat, LATS + dlat]
         lons += [LONS - dlon, LONS + dlon]
 
-    # Include ALL reference waypoints if enabled
     for wpt in waypoints:
         lats.append(wpt['lat'])
         lons.append(wpt['lon'])
@@ -722,10 +683,7 @@ def build_folium_map(folder, cfg):
 # ==========================================
 
 def generate_report(output_path, selected_sections=None):
-    """
-    Builds a self-contained HTML report with selected sections
-    and saves it to the volcano folder. Returns (success, message).
-    """
+    """Builds a self-contained, fully responsive HTML report."""
     folder = get_active_folder()
     if not folder:
         return False, "No active project found."
@@ -755,16 +713,13 @@ def generate_report(output_path, selected_sections=None):
             frp_chart_html = ""
             if fig_mapper:
                 frp_chart_html = (
-                    "<h3 style='color:#2980b9;margin-top:80px;margin-bottom:8px;'>"
-                    "📊 FRP & Distance Time Series</h3>"
+                    "<h3 class='ts-header'>📊 FRP & Distance Time Series</h3>"
                     + (mapper_stats_html or "")
                     + fig_mapper.to_html(full_html=False, include_plotlyjs=False,
                                          config={'displaylogo': False})
                 )
             sections.append(("<h2>🌋 Thermal Anomaly Map</h2>",
-                             f'<div style="width:100%;max-width:1100px;height:600px;'
-                             f'margin:0 0 20px 0;">{map_html}</div>'
-                             + frp_chart_html))
+                             f'<div class="map-container">{map_html}</div>' + frp_chart_html))
 
     if 'speed' in selected_sections:
         fig_speed, speed_stats_html = build_speed_figure(folder, cfg)
@@ -784,83 +739,179 @@ def generate_report(output_path, selected_sections=None):
     <title>LavaFlow Report — {volcano}</title>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <script>
-        window.addEventListener('load', function() {{
+        // Make all Plotly charts truly responsive — listen for resize and orientation change
+        function resizePlotly() {{
             var graphs = document.querySelectorAll('.plotly-graph-div');
-            graphs.forEach(function(g) {{
-                Plotly.relayout(g, {{autosize: true}});
-            }});
-        }});
-        window.addEventListener('resize', function() {{
-            var graphs = document.querySelectorAll('.plotly-graph-div');
-            graphs.forEach(function(g) {{ Plotly.relayout(g, {{autosize: true}}); }});
-        }});
+            graphs.forEach(function(g) {{ try {{ Plotly.Plots.resize(g); }} catch(e) {{}} }});
+        }}
+        window.addEventListener('load', resizePlotly);
+        window.addEventListener('resize', resizePlotly);
+        window.addEventListener('orientationchange', resizePlotly);
     </script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
+        /* ========== BASE LAYOUT ========== */
         * {{ box-sizing: border-box; }}
+        html, body {{ width: 100%; overflow-x: hidden; }}
         body {{
-            font-family: Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
             margin: 0;
             padding: 0;
             background: #f5f6fa;
             color: #2c3e50;
+            line-height: 1.4;
         }}
+
+        /* ========== HEADER ========== */
         .header {{
             background: linear-gradient(135deg, #2c3e50, #3498db);
             color: white;
-            padding: 20px 16px;
+            padding: clamp(14px, 3vw, 24px) clamp(10px, 3vw, 20px);
             text-align: center;
         }}
-        .header h1 {{ margin: 0 0 8px 0; font-size: clamp(16px, 4vw, 28px); }}
+        .header h1 {{ margin: 0 0 6px 0; font-size: clamp(16px, 4.5vw, 28px); line-height: 1.2; }}
         .header p {{ margin: 4px 0; opacity: 0.85; font-size: clamp(11px, 2.5vw, 14px); }}
-        .container {{ max-width: 1200px; margin: 0 auto; padding: 12px; }}
+
+        /* ========== CONTAINER & SECTIONS ========== */
+        .container {{
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: clamp(8px, 2vw, 16px);
+        }}
         .section {{
             background: white;
-            border-radius: 10px;
+            border-radius: clamp(6px, 1.5vw, 10px);
             box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            padding: 16px 14px;
-            margin-bottom: 16px;
-            overflow-x: auto;
+            padding: clamp(10px, 2.5vw, 18px);
+            margin-bottom: clamp(10px, 2vw, 18px);
+            overflow: hidden;
         }}
         .section h2 {{
             margin: 0 0 12px 0;
-            font-size: clamp(14px, 3.5vw, 20px);
+            font-size: clamp(15px, 3.5vw, 20px);
             color: #2980b9;
             border-bottom: 2px solid #eee;
             padding-bottom: 8px;
         }}
-        .chart {{ width: 100%; min-width: 0; }}
-        .chart .plotly-graph-div {{ width: 100% !important; }}
-        .footer {{
-            text-align: center;
-            padding: 16px;
-            font-size: 11px;
-            color: #999;
+
+        /* ========== TIME-SERIES SUBSECTION HEADER ========== */
+        .ts-header {{
+            color: #2980b9;
+            margin: clamp(24px, 6vw, 60px) 0 8px 0;
+            font-size: clamp(13px, 3vw, 16px);
         }}
+
+        /* ========== PROJECT PARAMETERS META GRID ========== */
         .meta-grid {{
             display: flex;
-            gap: 10px;
+            gap: clamp(6px, 1.5vw, 10px);
             flex-wrap: wrap;
             margin-bottom: 5px;
         }}
         .meta-box {{
             background: #f0f4f8;
-            border-radius: 6px;
-            padding: 8px 12px;
-            flex: 1 1 120px;
-            min-width: 100px;
             border: 1px solid #dde;
+            border-radius: 6px;
+            padding: clamp(6px, 1.5vw, 10px) clamp(8px, 2vw, 14px);
+            flex: 1 1 130px;
+            min-width: 0;
         }}
-        .meta-box .label {{ font-size: 10px; color: #7f8c8d; }}
-        .meta-box .value {{ font-size: clamp(12px, 2.5vw, 16px); font-weight: bold; color: #2c3e50; }}
-        [style*="display:flex"] {{ flex-wrap: wrap !important; }}
-        iframe {{ max-width: 100%; }}
-        @media (max-width: 600px) {{
-            .header {{ padding: 14px 10px; }}
-            .container {{ padding: 8px; }}
-            .section {{ padding: 12px 10px; }}
-            .meta-box {{ flex: 1 1 80px; padding: 6px 8px; }}
+        .meta-box .label {{ font-size: clamp(9px, 2vw, 11px); color: #7f8c8d; }}
+        .meta-box .value {{
+            font-size: clamp(12px, 2.5vw, 16px);
+            font-weight: bold;
+            color: #2c3e50;
+            word-break: break-word;
+        }}
+
+        /* ========== STATS PANELS ========== */
+        .stats-section {{ margin-bottom: clamp(12px, 2.5vw, 20px); }}
+        .stats-title {{
+            font-weight: bold;
+            font-size: clamp(12px, 2.6vw, 14px);
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }}
+        .stats-grid {{
+            display: flex;
+            gap: clamp(6px, 1.5vw, 12px);
+            flex-wrap: wrap;
+            margin: 12px 0 16px 0;
+        }}
+        .stat-box {{
+            flex: 1 1 140px;
+            min-width: 0;
+            padding: clamp(8px, 2vw, 14px) clamp(10px, 2vw, 18px);
+            background: #f0f4f8;
+            border: 1px solid #dde;
+            border-radius: 8px;
+        }}
+        .stat-box--outlined {{ border: 2px solid #2980b9; text-align: center; }}
+        .stat-box--alert    {{ background: #eaf4fb; border: 2px solid #e74c3c; }}
+        .stat-label {{
+            font-size: clamp(10px, 2vw, 11px);
+            color: #7f8c8d;
+            margin-bottom: 4px;
+        }}
+        .stat-value {{
+            font-size: clamp(16px, 4vw, 22px);
+            font-weight: bold;
+            color: #2c3e50;
+            line-height: 1.1;
+        }}
+        .stat-value--accent {{ color: #2980b9; }}
+        .stat-value--alert  {{ color: #e74c3c; }}
+        .stat-meta {{ font-size: clamp(9px, 2vw, 11px); color: #95a5a6; margin-top: 2px; }}
+
+        /* ========== MAP CONTAINER ========== */
+        /* The folium iframe inside is responsive via its own padding-bottom hack.
+           We just constrain max-width and rely on iframe's intrinsic aspect ratio. */
+        .map-container {{
+            width: 100%;
+            max-width: 1100px;
+            margin: 0 0 20px 0;
+        }}
+        .map-container iframe {{
+            width: 100% !important;
+            max-width: 100%;
+            border: none;
+            border-radius: 8px;
+            display: block;
+        }}
+
+        /* ========== PLOTLY CHARTS ========== */
+        .chart {{ width: 100%; min-width: 0; overflow-x: auto; }}
+        .chart .plotly-graph-div {{ width: 100% !important; }}
+        .chart .js-plotly-plot {{ width: 100% !important; }}
+
+        /* ========== FOOTER ========== */
+        .footer {{
+            text-align: center;
+            padding: clamp(10px, 2.5vw, 18px);
+            font-size: clamp(10px, 2vw, 12px);
+            color: #999;
+        }}
+
+        /* ========== RESPONSIVE BREAKPOINTS ========== */
+        /* Tablet: 2-column meta-grid, slightly tighter stat boxes */
+        @media (max-width: 768px) {{
+            .meta-box {{ flex: 1 1 calc(50% - 6px); }}
+            .stat-box {{ flex: 1 1 calc(50% - 6px); }}
+        }}
+
+        /* Small phones: keep 2-column stats but smaller padding */
+        @media (max-width: 480px) {{
+            .stats-grid {{ gap: 6px; }}
+            .meta-grid  {{ gap: 6px; }}
+            .stat-box   {{ padding: 8px 10px; }}
+            .meta-box   {{ flex: 1 1 calc(50% - 3px); }}
+        }}
+
+        /* Very narrow phones: single column for everything */
+        @media (max-width: 360px) {{
+            .stat-box {{ flex: 1 1 100%; }}
+            .meta-box {{ flex: 1 1 100%; }}
         }}
     </style>
 </head>
