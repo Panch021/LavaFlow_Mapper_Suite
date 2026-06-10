@@ -33,6 +33,23 @@ PROJECTS_DIR = "projects"
 os.makedirs(PROJECTS_DIR, exist_ok=True)
 
 
+# ---- SAVE button style helpers ----
+SAVE_BUTTON_BASE = {
+    'padding': '15px 30px',
+    'color': 'white', 'fontWeight': 'bold', 'border': 'none',
+    'borderRadius': '5px',
+}
+
+def save_button_style(is_example):
+    """Returns the inline style dict for the SAVE button depending on whether
+    the active project is a read-only example."""
+    return {
+        **SAVE_BUTTON_BASE,
+        'backgroundColor': '#95a5a6' if is_example else '#e67e22',
+        'cursor': 'not-allowed' if is_example else 'pointer',
+    }
+
+
 # ---- Volcano name input styling helpers ----
 VOLCANO_INPUT_BASE = {
     'width': '100%', 'marginBottom': '10px',
@@ -63,8 +80,6 @@ def parse_waypoints_from_config(c):
       - Legacy single-waypoint format: wpt_names=Foo, wpt_lats=1.0, ...
       - New multi-waypoint format:    wpt_names=Foo;Bar, wpt_lats=1.0;2.0, ...
     Returns a list of dicts {name, lat, lon, symbol}. Ensures at least one entry.
-    Downstream modules (LavaFlow_mapper, Export_report) should also use this
-    function (or replicate its logic) to read the multi-waypoint config.
     """
     def _as_list(v):
         if isinstance(v, str):
@@ -181,16 +196,33 @@ def list_existing_projects():
 
 
 def get_active_volcano_name():
-    if os.path.exists("active_volcano.txt"):
-        with open("active_volcano.txt", "r") as f:
-            return f.read().strip()
-    return None
+    """
+    Returns the active project's folder path, or None if the file is missing
+    or points to a folder that does not exist on disk (e.g. fresh install
+    on a new computer where the previous active_volcano.txt is stale).
+    """
+    if not os.path.exists("active_volcano.txt"):
+        return None
+    with open("active_volcano.txt", "r") as f:
+        path = f.read().strip()
+    if not path:
+        return None
+    # Validate that the referenced folder actually exists; otherwise treat
+    # this as no active project so the UI starts in "create new" mode.
+    if not os.path.isdir(path):
+        return None
+    return path
 
 
 def get_display_name(folder_path):
     if not folder_path:
         return None
     return os.path.basename(folder_path).replace("_", " ")
+
+
+def is_example_path(path):
+    """True if the given path points inside the read-only examples directory."""
+    return bool(path) and path.startswith(EXAMPLES_DIR)
 
 
 def load_global_config():
@@ -290,7 +322,7 @@ def render_tab(tab, stats_data, mapper_data, speed_data):
     if tab == 'tab-config':
         existing_projects = list_existing_projects()
         active_path = get_active_volcano_name() or ""
-        is_example = active_path.startswith(EXAMPLES_DIR)
+        is_example = is_example_path(active_path)
         initial_waypoints = parse_waypoints_from_config(c)
 
         return html.Div([
@@ -408,7 +440,6 @@ def render_tab(tab, stats_data, mapper_data, speed_data):
 
                 # --- Multi-waypoint section ---
                 html.Div([
-                    # Header row: label, "show" checkbox, and the "+ Add Waypoint" button
                     html.Div([
                         html.Label("Reference Waypoints:", style={'fontWeight': 'bold'}),
                         dcc.Checklist(
@@ -425,7 +456,6 @@ def render_tab(tab, stats_data, mapper_data, speed_data):
                                    'fontSize': '13px'}),
                     ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '12px'}),
 
-                    # Store holds the current waypoint list; container is rebuilt from it
                     dcc.Store(id='wpt-list-store', data=initial_waypoints),
                     html.Div(id='wpt-container'),
                 ], style={'padding': '15px', 'border': '1px solid #ddd', 'borderRadius': '5px',
@@ -434,13 +464,10 @@ def render_tab(tab, stats_data, mapper_data, speed_data):
 
             html.Button("SAVE ALL PARAMETERS", id="btn-save-config", n_clicks=0,
                         disabled=is_example,
-                        style={'padding': '15px 30px',
-                               'backgroundColor': '#95a5a6' if is_example else '#e67e22',
-                               'color': 'white', 'fontWeight': 'bold', 'border': 'none',
-                               'borderRadius': '5px',
-                               'cursor': 'not-allowed' if is_example else 'pointer'}),
+                        style=save_button_style(is_example)),
             html.Div(
                 "📌 Example project — read only. Use GVP Search to create your own project." if is_example else "",
+                id='example-readonly-msg',
                 style={'marginTop': '10px', 'fontSize': '13px', 'color': '#7f8c8d', 'fontStyle': 'italic'}
             ),
             html.Div(id="config-save-status", style={'marginTop': '10px', 'fontWeight': 'bold', 'color': '#27ae60'})
@@ -600,6 +627,40 @@ def load_existing_project_cb(selected_volcano):
             f"LavaFlow Mapper Suite: {display_name}")
 
 
+# ------------------------------------------
+# SAVE button state — dynamically enable/disable when the active project changes.
+# Without this, the disabled state computed at tab render time would persist
+# even after the user switches from an example to a new project.
+# ------------------------------------------
+@app.callback(
+    [Output('btn-save-config', 'disabled'),
+     Output('btn-save-config', 'style'),
+     Output('example-readonly-msg', 'children')],
+    [Input('cfg-volcano-search', 'value'),
+     Input('cfg-load-project', 'value')],
+    prevent_initial_call=True
+)
+def update_save_button_state(gvp_selected, loaded_project):
+    """
+    Re-evaluates the SAVE button state when the user picks a project:
+      - GVP Search → always creates inside projects/, so button is enabled.
+      - Load Existing → enabled unless the path is under examples/.
+    """
+    from dash import ctx
+    trigger = ctx.triggered_id
+
+    if trigger == 'cfg-volcano-search' and gvp_selected:
+        is_example = False
+    elif trigger == 'cfg-load-project' and loaded_project:
+        is_example = is_example_path(loaded_project)
+    else:
+        return no_update, no_update, no_update
+
+    msg = ("📌 Example project — read only. Use GVP Search to create your own project."
+           if is_example else "")
+    return is_example, save_button_style(is_example), msg
+
+
 @app.callback(
     [Output("config-save-status", "children", allow_duplicate=True),
      Output('main-header-title', 'children', allow_duplicate=True)],
@@ -610,7 +671,6 @@ def load_existing_project_cb(selected_volcano):
      State('cfg-chk-rad', 'value'), State('cfg-radius-m', 'value'),
      State('cfg-chk-shp', 'value'), State('cfg-shp-path', 'value'),
      State('cfg-chk-wpt', 'value'),
-     # Multi-waypoint values via pattern matching
      State({'type': 'wpt-name',   'index': ALL}, 'value'),
      State({'type': 'wpt-lat',    'index': ALL}, 'value'),
      State({'type': 'wpt-lon',    'index': ALL}, 'value'),
@@ -624,7 +684,7 @@ def save_all(n, vol, latv, lonv, sd, ed, frp, frp_mode, trk, m_key,
         folder_name = vol.strip().replace(" ", "_")
         active_path = get_active_volcano_name() or ""
 
-        if active_path.startswith(EXAMPLES_DIR):
+        if is_example_path(active_path):
             return (
                 "⚠️ Examples are read-only. To create your own project, use the GVP Search above.",
                 no_update
@@ -645,7 +705,6 @@ def save_all(n, vol, latv, lonv, sd, ed, frp, frp_mode, trk, m_key,
         except:
             e_d = "01/05/2026 23:59"
 
-        # Serialize waypoints as ';'-separated lists for downstream modules
         names_str = ';'.join([str(w or '') for w in (wpt_names or [])])
         lats_str  = ';'.join([str(w if w is not None else 0.0) for w in (wpt_lats or [])])
         lons_str  = ';'.join([str(w if w is not None else 0.0) for w in (wpt_lons or [])])
@@ -840,7 +899,6 @@ def remove_waypoint_cb(n_clicks_list, names, lats, lons, syms):
     from dash import ctx
     if not ctx.triggered_id or not isinstance(ctx.triggered_id, dict):
         return no_update
-    # Only proceed if at least one button has actually been clicked
     if not any(n for n in (n_clicks_list or []) if n):
         return no_update
     remove_idx = ctx.triggered_id.get('index')
