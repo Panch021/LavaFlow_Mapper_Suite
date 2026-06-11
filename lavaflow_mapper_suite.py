@@ -477,7 +477,16 @@ def render_tab(tab, stats_data, mapper_data, speed_data):
         return html.Div([
             html.H3("🛰️ Step 1: FIRMS Data Downloader"),
             html.Div([
-                html.P("Updates volcano FIRMS records. Large ranges are automatically split into 5-day chunks."),
+                html.P(["Updates volcano FIRMS records. Large ranges are automatically split into 5-day chunks. "
+                       "Please note that the API only provides access to data from the previous year. "
+                       "For records older than one year, use the ",
+                       html.A(
+                           "FIRMS Download Service",
+                           href= "https://firms.modaps.eosdis.nasa.gov/download/",
+                           target="_blank"
+                       ),
+                       "."
+                ], style={'fontSize': '16px'}),
                 html.Div([html.Label("Download Radius (m):"),
                           dcc.Input(id='dl-radius', type='number', value=c.get('ref_radius_m', 10000),
                                     style={'width': '150px', 'display': 'block', 'margin': '10px auto'})]),
