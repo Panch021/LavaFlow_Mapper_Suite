@@ -57,6 +57,40 @@ def load_global_config():
 
 
 # ==========================================
+# 0a. UNIFIED DATE PARSER  (NEW)
+# ==========================================
+def parse_firms_date(series):
+    """
+    Robust FIRMS date parser. Handles mixed formats row-by-row.
+
+    Detects format by inspecting the string itself:
+      - If it matches YYYY-MM-DD or YYYY-MM-DD HH:MM:SS -> ISO (year first)
+      - Otherwise it's assumed to be DD/MM/YYYY (LatAm/European)
+
+    IMPORTANT: never uses dayfirst=True as a fallback on ISO strings,
+    because '2026-01-03 06:39:00' with dayfirst=True is wrongly read as
+    1 March 2026 (the leading '03' is taken as the month).
+    """
+    s = series.astype(str).str.strip()
+
+    # Empty result
+    parsed = pd.Series([pd.NaT] * len(s), index=s.index, dtype='datetime64[ns]')
+
+    # Rows that LOOK like ISO (start with 4 digits + dash)
+    iso_mask = s.str.match(r'^\d{4}-\d{2}-\d{2}', na=False)
+    if iso_mask.any():
+        # No format=: lets pandas handle both 'YYYY-MM-DD' and 'YYYY-MM-DD HH:MM:SS'
+        parsed.loc[iso_mask] = pd.to_datetime(s[iso_mask], errors='coerce')
+
+    # Remaining rows: assume DD/MM/YYYY (Ecuadorian / European convention)
+    rest = parsed.isna() & s.ne('') & s.ne('nan')
+    if rest.any():
+        parsed.loc[rest] = pd.to_datetime(s[rest], dayfirst=True, errors='coerce')
+
+    return parsed
+
+
+# ==========================================
 # 0b. MULTI-WAYPOINT PARSER
 # ==========================================
 def parse_waypoints_from_config(c):
@@ -197,15 +231,21 @@ def build_anomalies_figure(folder, cfg):
                     df = pd.read_csv(fp, encoding='utf-8')
                 except UnicodeDecodeError:
                     df = pd.read_csv(fp, encoding='latin-1')
-                parsed = pd.to_datetime(df['acq_date'], format='%Y-%m-%d', errors='coerce')
-                if parsed.isna().all():
-                    parsed = pd.to_datetime(df['acq_date'], format='%d/%m/%Y', errors='coerce')
-                if parsed.isna().all():
-                    parsed = pd.to_datetime(df['acq_date'], dayfirst=True, errors='coerce')
-                df['acq_date'] = parsed
+
+                # ---- NEW: unified, row-wise robust parser ----
+                df['acq_date'] = parse_firms_date(df['acq_date'])
+
+                # Drop rows that still couldn't be parsed and log how many
+                n_before = len(df)
+                df = df.dropna(subset=['acq_date'])
+                n_dropped = n_before - len(df)
+                if n_dropped > 0:
+                    print(f"[Anomalies] {label}: {n_dropped}/{n_before} rows dropped (unparseable date)")
+
                 df['source'] = label
                 all_dfs.append(df[['acq_date', 'source']])
-            except Exception:
+            except Exception as e:
+                print(f"[Anomalies] Error reading {fname}: {e}")
                 continue
 
     if not all_dfs:
@@ -216,16 +256,18 @@ def build_anomalies_figure(folder, cfg):
     end_dt   = pd.to_datetime(cfg.get('end_day_str'),   dayfirst=True, errors='coerce')
     if pd.isna(start_dt) or pd.isna(end_dt):
         return None, None
+
+    # df = full period (used for stats AND for charts so numbers match)
     df = df_all[(df_all['acq_date'] >= start_dt) & (df_all['acq_date'] <= end_dt)].copy()
     if df.empty:
         return None, None
 
     week_day = 3
     df['week_label'] = df['acq_date'] - pd.to_timedelta((df['acq_date'].dt.dayofweek - week_day) % 7, unit='d')
-    first_full = start_dt + pd.Timedelta(days=(week_day - start_dt.dayofweek) % 7)
-    df = df[df['week_label'] >= first_full]
     df['month_label'] = df['acq_date'].dt.to_period('M').dt.to_timestamp()
 
+    # ---- CHANGED: do NOT cut off the first partial week.
+    # Counts in the chart now match counts in the stats panel.
     weekly = df.groupby(['week_label', 'source']).size().reset_index(name='count')
     monthly = df.groupby(['month_label', 'source']).size().reset_index(name='count')
 
@@ -233,7 +275,7 @@ def build_anomalies_figure(folder, cfg):
                         subplot_titles=("Weekly Anomalies", "Monthly Anomalies"))
 
     MS_IN_WEEK = 7 * 24 * 60 * 60 * 1000
-    actual_first = weekly['week_label'].min() if not weekly.empty else first_full
+    actual_first = weekly['week_label'].min() if not weekly.empty else start_dt
 
     for src, color in colors.items():
         w = weekly[weekly['source'] == src]
@@ -267,7 +309,9 @@ def build_anomalies_figure(folder, cfg):
                       title=dict(text=f"Thermal Anomalies — {cfg.get('volcano', folder)}", x=0.5),
                       legend=dict(orientation="h", y=-0.12, xanchor="center", x=0.5))
 
-    stats_html = build_anomaly_stats_html(compute_anomaly_stats(df_all, start_dt, end_dt, week_day))
+    # ---- CHANGED: stats now use the SAME filtered df as the charts,
+    # so panel totals and bar totals always agree.
+    stats_html = build_anomaly_stats_html(compute_anomaly_stats(df, start_dt, end_dt, week_day))
     return fig, stats_html
 
 
@@ -278,7 +322,13 @@ def build_mapper_figure(folder, cfg):
         return None, None
 
     df = pd.read_csv(fp)
-    df['date'] = pd.to_datetime(df['date'])
+
+    # ---- NEW: robust parser instead of bare pd.to_datetime(df['date']) ----
+    df['date'] = parse_firms_date(df['date'])
+    n_before = len(df)
+    df = df.dropna(subset=['date'])
+    if len(df) < n_before:
+        print(f"[Mapper] {n_before - len(df)}/{n_before} rows dropped (unparseable date)")
 
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08)
     sat_colors = {'SNPP': 'orange', 'NOAA20': 'purple', 'NOAA21': 'red'}
@@ -351,7 +401,11 @@ def build_speed_figure(folder, cfg):
         return None, None
 
     df = pd.read_csv(fp)
-    df['date'] = pd.to_datetime(df['date'])
+
+    # ---- NEW: robust parser ----
+    df['date'] = parse_firms_date(df['date'])
+    df = df.dropna(subset=['date'])
+
     volcano = cfg.get('volcano', folder)
 
     fig = make_subplots(specs=[[{"secondary_y": True}]])
@@ -533,7 +587,10 @@ def build_folium_map(folder, cfg):
         return None
 
     df = pd.read_csv(fp)
-    df['date'] = pd.to_datetime(df['date'])
+
+    # ---- NEW: robust parser ----
+    df['date'] = parse_firms_date(df['date'])
+    df = df.dropna(subset=['date'])
 
     LATS = cfg.get('lats_vent', 0.0)
     LONS = cfg.get('longs_vent', 0.0)
@@ -698,11 +755,23 @@ def generate_report(output_path, selected_sections=None):
     generated_on = datetime.now().strftime('%d/%m/%Y %H:%M')
 
     sections = []
+    # Use 'cdn' for the first Plotly chart so Plotly Python injects the CDN URL
+    # for the EXACT matching plotly.js version. Subsequent charts reuse it.
+    # This fixes the 'bdata' base64 binary-encoding bug where plotly-latest from
+    # the CDN doesn't decode arrays serialized by Plotly Python >=6.x.
+    _plotly_js_loaded = False
+
+    def _plotly_js_param():
+        nonlocal _plotly_js_loaded
+        if not _plotly_js_loaded:
+            _plotly_js_loaded = True
+            return 'cdn'
+        return False
 
     if 'anomalies' in selected_sections:
         fig_anom, anom_stats_html = build_anomalies_figure(folder, cfg)
         if fig_anom:
-            chart_html = fig_anom.to_html(full_html=False, include_plotlyjs=False, config={'displaylogo': False})
+            chart_html = fig_anom.to_html(full_html=False, include_plotlyjs=_plotly_js_param(), config={'displaylogo': False})
             sections.append(("<h2>📈 Thermal Anomaly Counts</h2>",
                              (anom_stats_html or "") + chart_html))
 
@@ -715,7 +784,7 @@ def generate_report(output_path, selected_sections=None):
                 frp_chart_html = (
                     "<h3 class='ts-header'>📊 FRP & Distance Time Series</h3>"
                     + (mapper_stats_html or "")
-                    + fig_mapper.to_html(full_html=False, include_plotlyjs=False,
+                    + fig_mapper.to_html(full_html=False, include_plotlyjs=_plotly_js_param(),
                                          config={'displaylogo': False})
                 )
             sections.append(("<h2>🌋 Thermal Anomaly Map</h2>",
@@ -724,7 +793,7 @@ def generate_report(output_path, selected_sections=None):
     if 'speed' in selected_sections:
         fig_speed, speed_stats_html = build_speed_figure(folder, cfg)
         if fig_speed:
-            chart_html = fig_speed.to_html(full_html=False, include_plotlyjs=False, config={'displaylogo': False})
+            chart_html = fig_speed.to_html(full_html=False, include_plotlyjs=_plotly_js_param(), config={'displaylogo': False})
             sections.append(("<h2>🚀 Propagation Speed</h2>",
                              (speed_stats_html or "") + chart_html))
 
@@ -737,7 +806,9 @@ def generate_report(output_path, selected_sections=None):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LavaFlow Report — {volcano}</title>
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <!-- NOTE: do NOT load plotly.js here. Each chart embeds its own matching
+         version via include_plotlyjs='cdn' below, which avoids the 'bdata'
+         binary-encoding incompatibility seen with plotly-latest. -->
     <script>
         // Make all Plotly charts truly responsive — listen for resize and orientation change
         function resizePlotly() {{
@@ -865,8 +936,6 @@ def generate_report(output_path, selected_sections=None):
         .stat-meta {{ font-size: clamp(9px, 2vw, 11px); color: #95a5a6; margin-top: 2px; }}
 
         /* ========== MAP CONTAINER ========== */
-        /* The folium iframe inside is responsive via its own padding-bottom hack.
-           We just constrain max-width and rely on iframe's intrinsic aspect ratio. */
         .map-container {{
             width: 100%;
             max-width: 1100px;
@@ -894,13 +963,11 @@ def generate_report(output_path, selected_sections=None):
         }}
 
         /* ========== RESPONSIVE BREAKPOINTS ========== */
-        /* Tablet: 2-column meta-grid, slightly tighter stat boxes */
         @media (max-width: 768px) {{
             .meta-box {{ flex: 1 1 calc(50% - 6px); }}
             .stat-box {{ flex: 1 1 calc(50% - 6px); }}
         }}
 
-        /* Small phones: keep 2-column stats but smaller padding */
         @media (max-width: 480px) {{
             .stats-grid {{ gap: 6px; }}
             .meta-grid  {{ gap: 6px; }}
@@ -908,7 +975,6 @@ def generate_report(output_path, selected_sections=None):
             .meta-box   {{ flex: 1 1 calc(50% - 3px); }}
         }}
 
-        /* Very narrow phones: single column for everything */
         @media (max-width: 360px) {{
             .stat-box {{ flex: 1 1 100%; }}
             .meta-box {{ flex: 1 1 100%; }}
