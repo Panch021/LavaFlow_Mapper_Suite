@@ -1101,7 +1101,7 @@ def generate_report(output_path, selected_sections=None):
 </head>
 <body>
     <div class="header">
-        <h1>🌋 LavaFlow Suite — {volcano}</h1>
+        <h1>🌋 LavaFlow Mapper Suite — {volcano}</h1>
         <p>Analysis period: {start_str} — {end_str}</p>
         <p>Generated: {generated_on}</p>
     </div>
