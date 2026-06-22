@@ -313,10 +313,7 @@ def register_callbacks(app):
         end_dt = pd.to_datetime(end)
         df = df_raw[(df_raw['acq_date'] >= start_dt) & (df_raw['acq_date'] <= end_dt)].copy()
 
-        if df.empty:
-            return go.Figure(), build_stats_panel({})
-
-        # Compute sidebar summary stats
+        # Compute sidebar summary stats (works even if df is empty for the range)
         stats = compute_summary_stats(df_raw, start_dt, end_dt, week_day)
         summary_panel = build_stats_panel(stats)
 
@@ -336,56 +333,93 @@ def register_callbacks(app):
 
         tick_val_w = weekly_tick_step * MS_IN_WEEK
 
-        # Align week labels to the selected week_day
-        df['week_label'] = df['acq_date'] - pd.to_timedelta(
-            (df['acq_date'].dt.dayofweek - week_day) % 7, unit='d'
-        )
+        # ---- Build the full week and month grids spanning the ENTIRE analysis period ----
+        # This guarantees that x-axis ticks cover the full Analysis Period even when
+        # there are no detections in the trailing (or leading) portion of the range.
 
-        # Drop the partial first week: only keep rows whose week starts on or after
-        # the first complete week boundary within the analysis range
+        # First complete week boundary within the analysis range (aligned to week_day)
         first_full_week_start = start_dt + pd.Timedelta(days=(week_day - start_dt.dayofweek) % 7)
-        df = df[df['week_label'] >= first_full_week_start]
+        # Last week boundary on or before end_dt (aligned to week_day)
+        last_week_start = end_dt - pd.Timedelta(days=(end_dt.dayofweek - week_day) % 7)
 
-        weekly = df.groupby(['week_label', 'source']).size().reset_index(name='count')
-        df['month_label'] = df['acq_date'].dt.to_period('M').dt.to_timestamp()
-        monthly = df.groupby(['month_label', 'source']).size().reset_index(name='count')
+        # Full weekly grid (may be empty if range < 1 week)
+        if last_week_start >= first_full_week_start:
+            all_weeks = pd.date_range(first_full_week_start, last_week_start, freq='7D')
+        else:
+            all_weeks = pd.DatetimeIndex([])
 
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=False, vertical_spacing=0.15)
+        # Full monthly grid spanning from month of start_dt to month of end_dt
+        first_month = start_dt.to_period('M').to_timestamp()
+        last_month = end_dt.to_period('M').to_timestamp()
+        all_months = pd.date_range(first_month, last_month, freq='MS')
+
         sensors = ['MODIS (AQUA/TERRA)', 'VIIRS (SNPP)', 'VIIRS (NOAA-20)', 'VIIRS (NOAA-21)']
         colors = ['blue', 'orange', 'purple', 'red']
 
-        for src, color in zip(sensors, colors):
-            w_data = weekly[weekly['source'] == src]
-            m_data = monthly[monthly['source'] == src]
+        # Aggregate weekly and monthly counts; reindex onto the full grids so missing
+        # weeks/months appear as zeros and the x-axis spans the whole Analysis Period.
+        if not df.empty:
+            df['week_label'] = df['acq_date'] - pd.to_timedelta(
+                (df['acq_date'].dt.dayofweek - week_day) % 7, unit='d'
+            )
+            df = df[df['week_label'] >= first_full_week_start]
+            df['month_label'] = df['acq_date'].dt.to_period('M').dt.to_timestamp()
 
+            weekly_pivot = (df.groupby(['week_label', 'source']).size()
+                              .unstack(fill_value=0)
+                              .reindex(all_weeks, fill_value=0))
+            monthly_pivot = (df.groupby(['month_label', 'source']).size()
+                               .unstack(fill_value=0)
+                               .reindex(all_months, fill_value=0))
+        else:
+            weekly_pivot = pd.DataFrame(0, index=all_weeks, columns=sensors)
+            monthly_pivot = pd.DataFrame(0, index=all_months, columns=sensors)
+
+        # Ensure every sensor column exists even if it had no detections
+        for s in sensors:
+            if s not in weekly_pivot.columns:
+                weekly_pivot[s] = 0
+            if s not in monthly_pivot.columns:
+                monthly_pivot[s] = 0
+
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=False, vertical_spacing=0.15)
+
+        for src, color in zip(sensors, colors):
             # Shift x by half a week so bars center visually over their tick label
-            w_x = w_data['week_label'] + pd.Timedelta(days=3.5)
+            w_x = weekly_pivot.index + pd.Timedelta(days=3.5)
+            w_y = weekly_pivot[src].values
             fig.add_trace(go.Bar(
-                x=w_x, y=w_data['count'], name=src, marker_color=color,
+                x=w_x, y=w_y, name=src, marker_color=color,
                 legendgroup=src,
                 hovertemplate="<b>%{customdata}</b><br>Anomalies: %{y}<extra></extra>",
-                customdata=w_data['week_label'].dt.strftime('%d %b %Y')
+                customdata=weekly_pivot.index.strftime('%d %b %Y')
             ), row=1, col=1)
 
             fig.add_trace(go.Bar(
-                x=m_data['month_label'], y=m_data['count'], name=src, marker_color=color,
+                x=monthly_pivot.index, y=monthly_pivot[src].values, name=src, marker_color=color,
                 xperiod="M1", xperiodalignment="middle",
                 legendgroup=src, showlegend=False,
                 hovertemplate="<b>%{x|%b %Y}</b><br>Anomalies: %{y}<extra></extra>"
             ), row=2, col=1)
 
-        # tick0 anchored to the actual first bar position (week_label, not shifted)
-        # so labels appear at the start of each week period, matching the hover date
-        actual_first_week = weekly['week_label'].min() if not weekly.empty else first_full_week_start
+        # ---- Force x-axis ranges to span the FULL analysis period ----
+        # Add a small padding so the first/last bars are not clipped by the axis edge.
+        weekly_pad = pd.Timedelta(days=3.5)
+        weekly_x_min = first_full_week_start - weekly_pad
+        weekly_x_max = (last_week_start + pd.Timedelta(days=7)) + weekly_pad
 
-        # Subplot 1: weekly ticks at week_label start (bars are shifted +3.5d visually)
+        monthly_x_min = first_month - pd.Timedelta(days=2)
+        monthly_x_max = (last_month + pd.offsets.MonthEnd(1)) + pd.Timedelta(days=2)
+
+        # Subplot 1: weekly ticks anchored at the first full week (bars shifted +3.5d visually)
         fig.update_xaxes(
             row=1, col=1,
             tickangle=45,
             type='date',
-            tick0=actual_first_week + pd.Timedelta(days=3.5),
+            tick0=first_full_week_start + pd.Timedelta(days=3.5),
             dtick=tick_val_w,
-            tickformat="%d %b %y"
+            tickformat="%d %b %y",
+            range=[weekly_x_min, weekly_x_max]
         )
 
         # Subplot 2: Monthly ticks centered under period
@@ -395,7 +429,8 @@ def register_callbacks(app):
             type='date',
             dtick="M1" if diff_days <= 730 else "M3",
             tickformat="%b %Y",
-            ticklabelmode="period"
+            ticklabelmode="period",
+            range=[monthly_x_min, monthly_x_max]
         )
 
         fig.update_yaxes(title_text="Weekly anomalies", row=1, col=1)
