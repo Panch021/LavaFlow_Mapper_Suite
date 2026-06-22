@@ -148,6 +148,26 @@ def get_layout():
         secondary_y=True
     )
 
+    # ---- Reference radius line on the Max Distance (primary) axis ----
+    # Shown only when include_reference_radius=True in the config. Plotted as
+    # a regular trace on the primary y-axis so it shares the same scale as
+    # Max Distance. Appears in the legend, so the user can toggle it from
+    # there without needing an extra button.
+    has_ref_radius = bool(cfg.get('include_reference_radius'))
+    if has_ref_radius:
+        ref_radius_km = cfg.get('ref_radius_m', 5000) / 1000.0
+        fig.add_trace(
+            go.Scatter(
+                x=[data['date'].min(), data['date'].max()],
+                y=[ref_radius_km, ref_radius_km],
+                mode='lines',
+                line=dict(color='#1f77b4', width=2, dash='dash'),
+                name=f"Ref. radius ({ref_radius_km:.2f} km)",
+                hovertemplate=f"Ref. radius: {ref_radius_km:.2f} km<extra></extra>",
+            ),
+            secondary_y=False
+        )
+
     fig.update_layout(
         title=dict(text=f"{volcano_name} - Lava Flow Propagation Speed<br>{start_str} to {end_str}",
                    x=0.5, font=dict(size=20)),
@@ -158,7 +178,8 @@ def get_layout():
     )
 
     fig.update_xaxes(title_text="Date", gridcolor='lightgrey')
-    fig.update_yaxes(title_text="Maximum Distance (km)", secondary_y=False, gridcolor='lightgrey')
+    fig.update_yaxes(title_text="Maximum Distance (km)", secondary_y=False,
+                     gridcolor='lightgrey', rangemode='tozero')
     fig.update_yaxes(title_text="Propagation Speed (m/h)", secondary_y=True,
                      type="linear", color="red", gridcolor='rgba(255,0,0,0.05)')
 
