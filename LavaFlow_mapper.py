@@ -297,7 +297,72 @@ def build_lock_zoom_script():
 
 
 # ==========================================
-# 2c. WAYPOINT MARKER HELPER
+# 2c. RADIUS LAYER -> PLOTLY BRIDGE
+# ==========================================
+def build_radius_bridge_script(layer_name="Reference Radius"):
+    """
+    Returns a <script> block injected into the folium iframe that listens
+    to LayerControl 'overlayadd' / 'overlayremove' events for the
+    Reference Radius layer and posts a message to the parent window so
+    the Plotly chart can show/hide its reference-radius trace in sync.
+    """
+    return f"""
+    <script>
+    (function() {{
+        var TARGET_LAYER = "{layer_name}";
+
+        function attachBridge() {{
+            var mapKey = Object.keys(window).find(function(k) {{
+                return k.startsWith('map_') && window[k] && window[k]._container;
+            }});
+            if (!mapKey) {{ setTimeout(attachBridge, 150); return; }}
+            var leafletMap = window[mapKey];
+
+            function postState(visible) {{
+                try {{
+                    window.parent.postMessage({{
+                        source: 'lavaflow-mapper',
+                        type:   'ref-radius-visibility',
+                        visible: visible
+                    }}, '*');
+                }} catch (e) {{}}
+            }}
+
+            // Listen for overlay toggle events from the LayerControl
+            leafletMap.on('overlayadd', function(e) {{
+                if (e.name === TARGET_LAYER) postState(true);
+            }});
+            leafletMap.on('overlayremove', function(e) {{
+                if (e.name === TARGET_LAYER) postState(false);
+            }});
+
+            // After init, broadcast the current state so the plot is in sync on load.
+            // Walks the map's layer list to detect whether the radius layer is on.
+            setTimeout(function() {{
+                var found = false, currentlyOn = false;
+                leafletMap.eachLayer(function(layer) {{
+                    // Folium tags FeatureGroups with options.name when registered to LayerControl
+                    if (layer && layer.options && layer.options.name === TARGET_LAYER) {{
+                        found = true; currentlyOn = true;
+                    }}
+                }});
+                // Whether or not it's currently on the map, broadcast it
+                postState(currentlyOn);
+            }}, 300);
+        }}
+
+        if (document.readyState === 'complete') {{
+            attachBridge();
+        }} else {{
+            window.addEventListener('load', attachBridge);
+        }}
+    }})();
+    </script>
+    """
+
+
+# ==========================================
+# 2d. WAYPOINT MARKER HELPER
 # ==========================================
 def add_waypoint_marker(feature_group, lat, lon, name, symbol):
     """Adds a single waypoint to a folium FeatureGroup with the requested symbol."""
@@ -443,7 +508,12 @@ def get_layout():
             except Exception as e:
                 shapefile_warning = f"⚠️ Error loading shapefile '{shp_name}': {str(e)}"
 
-    if cfg.get('include_reference_radius'):
+    # Track whether the reference radius is enabled at all — needed below to
+    # decide whether the plot should even contain the radius trace.
+    has_ref_radius = bool(cfg.get('include_reference_radius'))
+    ref_radius_km = cfg.get('ref_radius_m', 5000) / 1000.0
+
+    if has_ref_radius:
         fg_rad = folium.FeatureGroup(name='Reference Radius')
         folium.Circle(
             location=[LATS_vent, LONGS_vent], radius=cfg.get('ref_radius_m', 5000),
@@ -482,7 +552,7 @@ def get_layout():
     lons = list(filtered['longitude'].values) + [LONGS_vent]
 
     # If the reference radius is enabled, expand bounds so the full circle is visible
-    if cfg.get('include_reference_radius'):
+    if has_ref_radius:
         radius_m = cfg.get('ref_radius_m', 5000)
         # Rough degree conversion: 1 deg lat ≈ 111 km; lon adjusted by latitude
         dlat = radius_m / 111000.0
@@ -537,13 +607,73 @@ def get_layout():
                 hovertemplate="Date: %{x|%d/%m/%Y}<br>Max. Distance: %{y:.2f} km<extra></extra>"
             ), row=2, col=1)
 
+    # ---- Reference radius line on the distance subplot ----
+    # Independent toggle: a button in the top-right of the figure shows/hides
+    # the radius line. This is a self-contained Plotly control that does not
+    # depend on the map's LayerControl. The line also appears as a regular
+    # legend entry so it can be toggled from there as well.
+    REF_RADIUS_TRACE_NAME = "__ref_radius_line__"
+    if has_ref_radius:
+        fig.add_trace(go.Scatter(
+            x=[start_dt, end_dt],
+            y=[ref_radius_km, ref_radius_km],
+            mode='lines',
+            line=dict(color='black', width=1.5, dash='dash'),
+            name=f"Ref. radius ({ref_radius_km:.2f} km)",
+            legendgroup='ref_radius',
+            showlegend=True,
+            hovertemplate=f"Ref. radius: {ref_radius_km:.2f} km<extra></extra>",
+            meta=REF_RADIUS_TRACE_NAME,
+            visible=True,
+        ), row=2, col=1)
+
+        # Locate the index of the radius trace so the button targets it precisely.
+        # All other traces stay untouched ('args' uses trace indices).
+        radius_trace_idx = len(fig.data) - 1
+        n_traces = len(fig.data)
+
+        # 'restyle' args: visibility array spanning all traces. We keep every
+        # other trace's visibility as-is by passing None, and flip only the
+        # radius trace. Plotly accepts a list aligned with trace indices.
+        show_vis = [None] * n_traces
+        hide_vis = [None] * n_traces
+        show_vis[radius_trace_idx] = True
+        hide_vis[radius_trace_idx] = 'legendonly'   # keeps the legend entry visible
+
+        radius_buttons = dict(
+            type='buttons',
+            direction='right',
+            x=1.0, xanchor='right',
+            y=1.08, yanchor='bottom',
+            showactive=True,
+            buttons=[
+                dict(
+                    label='⚫ Show Ref. Radius',
+                    method='restyle',
+                    args=[{'visible': [True if i == radius_trace_idx else None
+                                       for i in range(n_traces)]}],
+                ),
+                dict(
+                    label='⚪ Hide Ref. Radius',
+                    method='restyle',
+                    args=[{'visible': ['legendonly' if i == radius_trace_idx else None
+                                       for i in range(n_traces)]}],
+                ),
+            ],
+            pad=dict(r=4, t=4, b=4, l=4),
+            bgcolor='#ecf0f1',
+            bordercolor='#bdc3c7',
+            font=dict(size=11),
+        )
+
     fig.update_layout(
         title=dict(
             text=f"FIRMS - Thermal anomalies<br>{volcano} volcano: {s_label} - {e_label}",
             x=0.5, xanchor='center', font=dict(size=18, color='black')
         ),
-        height=750, template="plotly_white", margin=dict(t=100, b=50),
-        legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="left", x=0)
+        height=750, template="plotly_white", margin=dict(t=140, b=50),
+        legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="left", x=0),
+        updatemenus=[radius_buttons] if has_ref_radius else [],
     )
 
     # Force x-axis to span the full configured period, regardless of data extent
@@ -551,7 +681,7 @@ def get_layout():
     fig.update_xaxes(range=[start_dt, end_dt], row=2, col=1)
 
     fig.update_yaxes(title_text="FRP (MW)", row=1, col=1)
-    fig.update_yaxes(title_text="Max. Lava Flow Distance (km)", row=2, col=1)
+    fig.update_yaxes(title_text="Max. Lava Flow Distance (km)", row=2, col=1, rangemode='tozero')
 
     # --- SUMMARY STATS PANEL ---
     # Read from filter_VIIRS_combined.csv to get global stats across all satellites
