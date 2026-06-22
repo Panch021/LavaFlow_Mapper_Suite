@@ -57,7 +57,7 @@ def load_global_config():
 
 
 # ==========================================
-# 0a. UNIFIED DATE PARSER  (NEW)
+# 0a. UNIFIED DATE PARSER
 # ==========================================
 def parse_firms_date(series):
     """
@@ -212,7 +212,12 @@ def build_anomaly_stats_html(stats):
 
 
 def build_anomalies_figure(folder, cfg):
-    """Weekly and monthly stacked bar charts from historical sensor CSVs."""
+    """Weekly and monthly stacked bar charts from historical sensor CSVs.
+
+    X-axis spans the full Analysis Period (start_day_str -> end_day_str) even
+    when there are no detections at the start or end of the range. Missing
+    weeks/months are reindexed to zero so the date ticks remain visible.
+    """
     folder_name = os.path.basename(folder)
     files = {
         'MODIS': f'historical_MODIS_NRT_{folder_name}.csv',
@@ -232,7 +237,7 @@ def build_anomalies_figure(folder, cfg):
                 except UnicodeDecodeError:
                     df = pd.read_csv(fp, encoding='latin-1')
 
-                # ---- NEW: unified, row-wise robust parser ----
+                # Unified, row-wise robust parser
                 df['acq_date'] = parse_firms_date(df['acq_date'])
 
                 # Drop rows that still couldn't be parsed and log how many
@@ -259,34 +264,69 @@ def build_anomalies_figure(folder, cfg):
 
     # df = full period (used for stats AND for charts so numbers match)
     df = df_all[(df_all['acq_date'] >= start_dt) & (df_all['acq_date'] <= end_dt)].copy()
-    if df.empty:
-        return None, None
 
     week_day = 3
-    df['week_label'] = df['acq_date'] - pd.to_timedelta((df['acq_date'].dt.dayofweek - week_day) % 7, unit='d')
-    df['month_label'] = df['acq_date'].dt.to_period('M').dt.to_timestamp()
+    sensors_order = list(colors.keys())
 
-    # ---- CHANGED: do NOT cut off the first partial week.
-    # Counts in the chart now match counts in the stats panel.
-    weekly = df.groupby(['week_label', 'source']).size().reset_index(name='count')
-    monthly = df.groupby(['month_label', 'source']).size().reset_index(name='count')
+    # ---- Build full week and month grids spanning the ENTIRE analysis period ----
+    # First complete week boundary within the analysis range (aligned to week_day)
+    first_full_week_start = start_dt + pd.Timedelta(days=(week_day - start_dt.dayofweek) % 7)
+    # Last week boundary on or before end_dt (aligned to week_day)
+    last_week_start = end_dt - pd.Timedelta(days=(end_dt.dayofweek - week_day) % 7)
+
+    if last_week_start >= first_full_week_start:
+        all_weeks = pd.date_range(first_full_week_start, last_week_start, freq='7D')
+    else:
+        all_weeks = pd.DatetimeIndex([])
+
+    # Full monthly grid: month-of-start_dt -> month-of-end_dt
+    first_month = start_dt.to_period('M').to_timestamp()
+    last_month = end_dt.to_period('M').to_timestamp()
+    all_months = pd.date_range(first_month, last_month, freq='MS')
+
+    # Aggregate weekly/monthly counts and reindex onto the full grids so
+    # missing periods appear as zeros and ticks span the whole Analysis Period.
+    if not df.empty:
+        df['week_label'] = df['acq_date'] - pd.to_timedelta(
+            (df['acq_date'].dt.dayofweek - week_day) % 7, unit='d'
+        )
+        df['month_label'] = df['acq_date'].dt.to_period('M').dt.to_timestamp()
+
+        weekly_pivot = (df.groupby(['week_label', 'source']).size()
+                          .unstack(fill_value=0)
+                          .reindex(all_weeks, fill_value=0))
+        monthly_pivot = (df.groupby(['month_label', 'source']).size()
+                           .unstack(fill_value=0)
+                           .reindex(all_months, fill_value=0))
+    else:
+        weekly_pivot = pd.DataFrame(0, index=all_weeks, columns=sensors_order)
+        monthly_pivot = pd.DataFrame(0, index=all_months, columns=sensors_order)
+
+    # Ensure every sensor column exists even if it had no detections
+    for s in sensors_order:
+        if s not in weekly_pivot.columns:
+            weekly_pivot[s] = 0
+        if s not in monthly_pivot.columns:
+            monthly_pivot[s] = 0
 
     fig = make_subplots(rows=2, cols=1, shared_xaxes=False, vertical_spacing=0.15,
                         subplot_titles=("Weekly Anomalies", "Monthly Anomalies"))
 
     MS_IN_WEEK = 7 * 24 * 60 * 60 * 1000
-    actual_first = weekly['week_label'].min() if not weekly.empty else start_dt
 
     for src, color in colors.items():
-        w = weekly[weekly['source'] == src]
-        m = monthly[monthly['source'] == src]
-        w_x = w['week_label'] + pd.Timedelta(days=3.5)
-        fig.add_trace(go.Bar(x=w_x, y=w['count'], name=src, marker_color=color, legendgroup=src,
-                             customdata=w['week_label'].dt.strftime('%d %b %Y'),
-                             hovertemplate="<b>%{customdata}</b><br>Anomalies: %{y}<extra></extra>"), row=1, col=1)
-        fig.add_trace(go.Bar(x=m['month_label'], y=m['count'], name=src, marker_color=color,
-                             legendgroup=src, showlegend=False, xperiod="M1", xperiodalignment="middle",
-                             hovertemplate="<b>%{x|%b %Y}</b><br>Anomalies: %{y}<extra></extra>"), row=2, col=1)
+        # Shift x by half a week so bars center visually over their tick label
+        w_x = weekly_pivot.index + pd.Timedelta(days=3.5)
+        fig.add_trace(go.Bar(
+            x=w_x, y=weekly_pivot[src].values, name=src, marker_color=color, legendgroup=src,
+            customdata=weekly_pivot.index.strftime('%d %b %Y'),
+            hovertemplate="<b>%{customdata}</b><br>Anomalies: %{y}<extra></extra>"
+        ), row=1, col=1)
+        fig.add_trace(go.Bar(
+            x=monthly_pivot.index, y=monthly_pivot[src].values, name=src, marker_color=color,
+            legendgroup=src, showlegend=False, xperiod="M1", xperiodalignment="middle",
+            hovertemplate="<b>%{x|%b %Y}</b><br>Anomalies: %{y}<extra></extra>"
+        ), row=2, col=1)
 
     diff_days = (end_dt - start_dt).days
     if diff_days <= 120:
@@ -298,19 +338,29 @@ def build_anomalies_figure(folder, cfg):
     else:
         weekly_tick_step = 8
 
+    # ---- Force x-axis ranges to span the FULL analysis period ----
+    weekly_pad = pd.Timedelta(days=3.5)
+    weekly_x_min = first_full_week_start - weekly_pad
+    weekly_x_max = (last_week_start + pd.Timedelta(days=7)) + weekly_pad
+
+    monthly_x_min = first_month - pd.Timedelta(days=2)
+    monthly_x_max = (last_month + pd.offsets.MonthEnd(1)) + pd.Timedelta(days=2)
+
     fig.update_xaxes(row=1, col=1, tickangle=45, type='date',
-                     tick0=actual_first + pd.Timedelta(days=3.5),
-                     dtick=weekly_tick_step * MS_IN_WEEK, tickformat="%d %b %y")
+                     tick0=first_full_week_start + pd.Timedelta(days=3.5),
+                     dtick=weekly_tick_step * MS_IN_WEEK, tickformat="%d %b %y",
+                     range=[weekly_x_min, weekly_x_max])
     fig.update_xaxes(row=2, col=1, tickangle=45, type='date',
-                     dtick="M1" if diff_days <= 730 else "M3", tickformat="%b %Y", ticklabelmode="period")
+                     dtick="M1" if diff_days <= 730 else "M3", tickformat="%b %Y",
+                     ticklabelmode="period",
+                     range=[monthly_x_min, monthly_x_max])
     fig.update_yaxes(title_text="Weekly anomalies", row=1, col=1)
     fig.update_yaxes(title_text="Monthly anomalies", row=2, col=1)
     fig.update_layout(barmode='stack', template="plotly_white", height=700, autosize=True,
                       title=dict(text=f"Thermal Anomalies — {cfg.get('volcano', folder)}", x=0.5),
                       legend=dict(orientation="h", y=-0.12, xanchor="center", x=0.5))
 
-    # ---- CHANGED: stats now use the SAME filtered df as the charts,
-    # so panel totals and bar totals always agree.
+    # Stats use the SAME filtered df as the charts so panel totals and bar totals agree.
     stats_html = build_anomaly_stats_html(compute_anomaly_stats(df, start_dt, end_dt, week_day))
     return fig, stats_html
 
@@ -323,7 +373,7 @@ def build_mapper_figure(folder, cfg):
 
     df = pd.read_csv(fp)
 
-    # ---- NEW: robust parser instead of bare pd.to_datetime(df['date']) ----
+    # Robust parser instead of bare pd.to_datetime(df['date'])
     df['date'] = parse_firms_date(df['date'])
     n_before = len(df)
     df = df.dropna(subset=['date'])
@@ -354,11 +404,62 @@ def build_mapper_figure(folder, cfg):
                                      marker=dict(color=color, size=6), showlegend=False,
                                      hovertemplate="Date: %{x|%d/%m/%Y}<br>Distance: %{y:.2f} km<extra></extra>"), row=2, col=1)
 
+    # ---- Reference radius line on the distance subplot ----
+    # Independent Plotly toggle: a button in the top-right of the figure
+    # shows/hides the radius line. Also appears as a regular legend entry
+    # so it can be toggled from the legend as well.
+    has_ref_radius = bool(cfg.get('include_reference_radius'))
+    ref_radius_km = cfg.get('ref_radius_m', 5000) / 1000.0
+    radius_buttons = None
+
+    if has_ref_radius and not pd.isna(start_dt) and not pd.isna(end_dt):
+        fig.add_trace(go.Scatter(
+            x=[start_dt, end_dt],
+            y=[ref_radius_km, ref_radius_km],
+            mode='lines',
+            line=dict(color='black', width=1.5, dash='dash'),
+            name=f"Ref. radius ({ref_radius_km:.2f} km)",
+            showlegend=True,
+            hovertemplate=f"Ref. radius: {ref_radius_km:.2f} km<extra></extra>",
+            visible=True,
+        ), row=2, col=1)
+
+        radius_trace_idx = len(fig.data) - 1
+        n_traces = len(fig.data)
+
+        radius_buttons = dict(
+            type='buttons',
+            direction='right',
+            x=1.0, xanchor='right',
+            y=1.12, yanchor='bottom',
+            showactive=True,
+            buttons=[
+                dict(
+                    label='⚫ Show Ref. Radius',
+                    method='restyle',
+                    args=[{'visible': [True if i == radius_trace_idx else None
+                                       for i in range(n_traces)]}],
+                ),
+                dict(
+                    label='⚪ Hide Ref. Radius',
+                    method='restyle',
+                    args=[{'visible': ['legendonly' if i == radius_trace_idx else None
+                                       for i in range(n_traces)]}],
+                ),
+            ],
+            pad=dict(r=4, t=4, b=4, l=4),
+            bgcolor='#ecf0f1',
+            bordercolor='#bdc3c7',
+            font=dict(size=11),
+        )
+
     fig.update_layout(template="plotly_white", height=600, autosize=True,
+                      margin=dict(t=130),
                       title=dict(text=f"FIRMS Thermal Anomalies — {volcano}<br>{s_label} – {e_label}", x=0.5),
-                      legend=dict(orientation="h", y=-0.15, xanchor="left", x=0))
+                      legend=dict(orientation="h", y=-0.15, xanchor="left", x=0),
+                      updatemenus=[radius_buttons] if radius_buttons else [])
     fig.update_yaxes(title_text="FRP (MW)", row=1, col=1)
-    fig.update_yaxes(title_text="Max. Lava Flow Distance (km)", row=2, col=1)
+    fig.update_yaxes(title_text="Max. Lava Flow Distance (km)", row=2, col=1, rangemode='tozero')
 
     if not pd.isna(start_dt) and not pd.isna(end_dt):
         fig.update_xaxes(range=[start_dt, end_dt], row=1, col=1)
@@ -402,7 +503,7 @@ def build_speed_figure(folder, cfg):
 
     df = pd.read_csv(fp)
 
-    # ---- NEW: robust parser ----
+    # Robust parser
     df['date'] = parse_firms_date(df['date'])
     df = df.dropna(subset=['date'])
 
@@ -415,10 +516,27 @@ def build_speed_figure(folder, cfg):
     fig.add_trace(go.Scatter(x=df['date'], y=df['speed'], name="Prop. Speed",
                               mode='lines+markers', line=dict(color='red', width=2, dash='dot'),
                               marker=dict(size=7, symbol='diamond')), secondary_y=True)
+
+    # ---- Reference radius line on the Max Distance (primary) axis ----
+    # Plotted as a regular trace so it appears in the legend and can be
+    # toggled from there. Blue to keep it visually distinct from the black
+    # Max Distance line.
+    has_ref_radius = bool(cfg.get('include_reference_radius'))
+    if has_ref_radius and not df.empty:
+        ref_radius_km = cfg.get('ref_radius_m', 5000) / 1000.0
+        fig.add_trace(go.Scatter(
+            x=[df['date'].min(), df['date'].max()],
+            y=[ref_radius_km, ref_radius_km],
+            mode='lines',
+            line=dict(color='#1f77b4', width=2, dash='dash'),
+            name=f"Ref. radius ({ref_radius_km:.2f} km)",
+            hovertemplate=f"Ref. radius: {ref_radius_km:.2f} km<extra></extra>",
+        ), secondary_y=False)
+
     fig.update_layout(template="plotly_white", height=500, autosize=True,
                       title=dict(text=f"Lava Flow Propagation Speed — {volcano}", x=0.5),
                       legend=dict(orientation="h", y=-0.2, xanchor="center", x=0.5))
-    fig.update_yaxes(title_text="Maximum Distance (km)", secondary_y=False)
+    fig.update_yaxes(title_text="Maximum Distance (km)", secondary_y=False, rangemode='tozero')
     fig.update_yaxes(title_text="Propagation Speed (m/h)", secondary_y=True, color="red")
 
     speed_valid = df['speed'].dropna()
@@ -588,7 +706,7 @@ def build_folium_map(folder, cfg):
 
     df = pd.read_csv(fp)
 
-    # ---- NEW: robust parser ----
+    # Robust parser
     df['date'] = parse_firms_date(df['date'])
     df = df.dropna(subset=['date'])
 
