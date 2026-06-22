@@ -421,20 +421,68 @@ def register_callbacks(app):
             dl.Circle(center=[r.latitude, r.longitude], radius=185, color="#e74c3c", fill=True, opacity=1.0, weight=1)
             for _, r in today_data.iterrows()]
 
+        # ---- Time-series subplot ----
+        # Top:    FRP as markers (one trace per satellite).
+        # Bottom: Distance as vertical stems (line from y=0 to value) plus a marker
+        #         on top — same visual style as the export report's mapper figure.
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1)
         if not all_visible.empty:
             for sat, color in sat_colors.items():
                 s_df = all_visible[all_visible['satellite'] == sat]
-                if not s_df.empty:
-                    fig.add_trace(go.Scatter(x=s_df['date'], y=s_df['frp'], mode='markers', name=sat,
-                                             marker=dict(color=color, size=6)), row=1, col=1)
-                    fig.add_trace(go.Scatter(x=s_df['date'], y=s_df['distance_km'], mode='markers', name=sat,
-                                             marker=dict(color=color, size=6), showlegend=False), row=2, col=1)
+                if s_df.empty:
+                    continue
+
+                # --- FRP (markers only) ---
+                fig.add_trace(go.Scatter(
+                    x=s_df['date'], y=s_df['frp'],
+                    mode='markers', name=sat,
+                    marker=dict(color=color, size=7, line=dict(width=1, color='black')),
+                    legendgroup=sat,
+                    hovertemplate="Date: %{x|%d/%m/%Y}<br>FRP: %{y} MW<extra></extra>"
+                ), row=1, col=1)
+
+                # --- Distance: vertical stems (lollipop style) ---
+                # Build a single multi-segment line trace using None separators so
+                # each row gets its own vertical line from 0 -> distance_km.
+                stem_x, stem_y = [], []
+                for _, r in s_df.iterrows():
+                    stem_x.extend([r['date'], r['date'], None])
+                    stem_y.extend([0, r['distance_km'], None])
+
+                fig.add_trace(go.Scatter(
+                    x=stem_x, y=stem_y,
+                    mode='lines',
+                    line=dict(color=color, width=1.2),
+                    legendgroup=sat, showlegend=False,
+                    hoverinfo='skip'
+                ), row=2, col=1)
+
+                # Markers on top of each stem
+                fig.add_trace(go.Scatter(
+                    x=s_df['date'], y=s_df['distance_km'],
+                    mode='markers',
+                    marker=dict(color=color, size=6),
+                    legendgroup=sat, showlegend=False,
+                    hovertemplate="Date: %{x|%d/%m/%Y}<br>Distance: %{y:.2f} km<extra></extra>"
+                ), row=2, col=1)
+
+        # ---- Reference radius line on the distance subplot ----
+        # Tied to the same 'RAD' checkbox that toggles the radius on the map,
+        # so the user gets a single, consistent control for both views.
+        if 'RAD' in layers:
+            ref_radius_km = local_cfg.get('ref_radius_m', 5000) / 1000.0
+            fig.add_hline(
+                y=ref_radius_km, row=2, col=1,
+                line=dict(color='black', width=1.5, dash='dash'),
+                annotation_text=f"Ref. radius: {ref_radius_km:.2f} km",
+                annotation_position="top left",
+                annotation_font=dict(size=11, color='black')
+            )
 
         fig.update_layout(template="plotly_white", margin=dict(l=50, r=20, t=20, b=20), height=380,
                           legend=dict(orientation="h", y=-0.2))
         fig.update_yaxes(title_text="FRP (MW)", row=1, col=1)
-        fig.update_yaxes(title_text="Distance (km)", row=2, col=1)
+        fig.update_yaxes(title_text="Distance (km)", row=2, col=1, rangemode='tozero')
 
         metrics = html.Div([
             html.P([html.Strong("Cumulative Alerts: "), f"{len(all_visible)}"]),
