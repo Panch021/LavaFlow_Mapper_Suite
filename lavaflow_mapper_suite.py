@@ -6,7 +6,10 @@ import webbrowser
 from threading import Timer
 from datetime import datetime, date, timedelta
 
-# Technical modules import
+# Shared helpers
+import lavaflow_common as lfc
+
+# Technical modules
 import FIRMS_download as download_logic
 import Anomalies_count as anomalies_module
 import FRP_Statistics as stats_module
@@ -27,191 +30,13 @@ else:
     df_gvp = pd.DataFrame()
     gvp_options = []
 
-# ---- Project directory structure ----
-EXAMPLES_DIR = "examples"
-PROJECTS_DIR = "projects"
+EXAMPLES_DIR = lfc.EXAMPLES_DIR
+PROJECTS_DIR = lfc.PROJECTS_DIR
 os.makedirs(PROJECTS_DIR, exist_ok=True)
 
-
-# ---- SAVE button style helpers ----
-SAVE_BUTTON_BASE = {
-    'padding': '15px 30px',
-    'color': 'white', 'fontWeight': 'bold', 'border': 'none',
-    'borderRadius': '5px',
-}
-
-def save_button_style(is_example):
-    """Returns the inline style dict for the SAVE button depending on whether
-    the active project is a read-only example."""
-    return {
-        **SAVE_BUTTON_BASE,
-        'backgroundColor': '#95a5a6' if is_example else '#e67e22',
-        'cursor': 'not-allowed' if is_example else 'pointer',
-    }
-
-
-# ---- Volcano name input styling helpers ----
-VOLCANO_INPUT_BASE = {
-    'width': '100%', 'marginBottom': '10px',
-    'padding': '6px 8px', 'borderRadius': '5px',
-}
-
-def volcano_input_style(volcano_value):
-    """Highlight the volcano name input once a real volcano has been selected."""
-    has_volcano = bool(volcano_value) and str(volcano_value).strip() not in ('', 'Volcano Name')
-    if has_volcano:
-        return {**VOLCANO_INPUT_BASE,
-                'border': '2px solid #27ae60',
-                'backgroundColor': '#eafaf1',
-                'fontWeight': 'bold'}
-    return {**VOLCANO_INPUT_BASE,
-            'border': '1px solid #ccc',
-            'backgroundColor': 'white',
-            'fontWeight': 'normal'}
-
-
-# ==========================================
-# 0b. WAYPOINT HELPERS (multi-waypoint support)
-# ==========================================
-
-def parse_waypoints_from_config(c):
-    """
-    Parses waypoints from the config dict. Supports both:
-      - Legacy single-waypoint format: wpt_names=Foo, wpt_lats=1.0, ...
-      - New multi-waypoint format:    wpt_names=Foo;Bar, wpt_lats=1.0;2.0, ...
-    Returns a list of dicts {name, lat, lon, symbol}. Ensures at least one entry.
-    """
-    def _as_list(v):
-        if isinstance(v, str):
-            return [x.strip() for x in v.split(';')]
-        return [str(v)]
-
-    names = _as_list(c.get('wpt_names', ''))
-    lats  = _as_list(c.get('wpt_lats', 0.0))
-    lons  = _as_list(c.get('wpt_lons', 0.0))
-    syms  = _as_list(c.get('wpt_symbols', 'circle'))
-
-    n = max(len(names), len(lats), len(lons), len(syms))
-    waypoints = []
-    for i in range(n):
-        try:
-            name = names[i] if i < len(names) else ''
-            lat_raw = lats[i] if i < len(lats) else '0.0'
-            lon_raw = lons[i] if i < len(lons) else '0.0'
-            sym = syms[i] if i < len(syms) else 'circle'
-            lat = float(lat_raw) if str(lat_raw).strip() else 0.0
-            lon = float(lon_raw) if str(lon_raw).strip() else 0.0
-            waypoints.append({
-                'name': str(name).strip(),
-                'lat': lat,
-                'lon': lon,
-                'symbol': str(sym).strip() or 'circle',
-            })
-        except (ValueError, IndexError):
-            continue
-
-    if not waypoints:
-        waypoints = [{'name': '', 'lat': 0.0, 'lon': 0.0, 'symbol': 'circle'}]
-    return waypoints
-
-
-def render_waypoint_row(idx, wpt):
-    """Renders a single waypoint row with pattern-matched IDs so callbacks
-    can read/remove individual waypoints. idx is the position in the list."""
-    return html.Div([
-        html.Div([
-            html.Span(f"📍 Waypoint {idx + 1}", style={
-                'fontWeight': 'bold', 'fontSize': '13px', 'color': '#2c3e50'}),
-            html.Button("× Remove",
-                id={'type': 'wpt-remove', 'index': idx},
-                n_clicks=0,
-                style={'marginLeft': 'auto', 'padding': '3px 10px',
-                       'backgroundColor': '#e74c3c', 'color': 'white',
-                       'border': 'none', 'borderRadius': '4px',
-                       'cursor': 'pointer', 'fontSize': '11px',
-                       'fontWeight': 'bold'}),
-        ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '8px'}),
-        html.Div([
-            html.Div([
-                html.Label("Name:", style={'display': 'block', 'fontSize': '11px',
-                                            'color': '#7f8c8d'}),
-                dcc.Input(id={'type': 'wpt-name', 'index': idx},
-                          type='text', value=wpt.get('name', ''),
-                          style={'width': '140px'})
-            ], style={'display': 'inline-block', 'marginRight': '10px'}),
-            html.Div([
-                html.Label("Latitude:", style={'display': 'block', 'fontSize': '11px',
-                                                'color': '#7f8c8d'}),
-                dcc.Input(id={'type': 'wpt-lat', 'index': idx},
-                          type='number', value=wpt.get('lat', 0.0),
-                          style={'width': '150px'})
-            ], style={'display': 'inline-block', 'marginRight': '10px'}),
-            html.Div([
-                html.Label("Longitude:", style={'display': 'block', 'fontSize': '11px',
-                                                 'color': '#7f8c8d'}),
-                dcc.Input(id={'type': 'wpt-lon', 'index': idx},
-                          type='number', value=wpt.get('lon', 0.0),
-                          style={'width': '150px'})
-            ], style={'display': 'inline-block', 'marginRight': '10px'}),
-            html.Div([
-                html.Label("Symbol:", style={'display': 'block', 'fontSize': '11px',
-                                              'color': '#7f8c8d'}),
-                dcc.Dropdown(id={'type': 'wpt-symbol', 'index': idx},
-                             value=wpt.get('symbol', 'circle'),
-                             clearable=False,
-                             style={'width': '160px'},
-                             options=[
-                                 {'label': '● Circle',   'value': 'circle'},
-                                 {'label': '▲ Triangle', 'value': 'triangle'},
-                                 {'label': '■ Square',   'value': 'square'},
-                             ])
-            ], style={'display': 'inline-block', 'verticalAlign': 'top'}),
-        ]),
-    ], style={
-        'padding': '12px', 'marginBottom': '10px',
-        'backgroundColor': 'white', 'borderRadius': '5px',
-        'border': '1px solid #ddd',
-    })
-
-
-def list_existing_projects():
-    """Scans examples/ and projects/ for valid volcano config files."""
-    projects = []
-    scan_dirs = [(PROJECTS_DIR, ""), (EXAMPLES_DIR, " 📌 Example")]
-    for base_dir, tag in scan_dirs:
-        if not os.path.isdir(base_dir):
-            continue
-        for item in sorted(os.listdir(base_dir)):
-            folder_path = os.path.join(base_dir, item)
-            if not os.path.isdir(folder_path) or item.startswith("."):
-                continue
-            config_file = os.path.join(folder_path, f"config_{item}.txt")
-            if os.path.exists(config_file):
-                display_name = item.replace("_", " ")
-                projects.append({
-                    'label': f"📁 {display_name}{tag}",
-                    'value': folder_path
-                })
-    return sorted(projects, key=lambda x: x['label'])
-
-
-def get_active_volcano_name():
-    """
-    Returns the active project's folder path, or None if the file is missing
-    or points to a folder that does not exist on disk (e.g. fresh install
-    on a new computer where the previous active_volcano.txt is stale).
-    """
-    if not os.path.exists("active_volcano.txt"):
-        return None
-    with open("active_volcano.txt", "r") as f:
-        path = f.read().strip()
-    if not path:
-        return None
-    # Validate that the referenced folder actually exists; otherwise treat
-    # this as no active project so the UI starts in "create new" mode.
-    if not os.path.isdir(path):
-        return None
-    return path
+get_active_volcano_name = lfc.get_active_folder
+is_example_path = lfc.is_example_path
+load_global_config = lfc.load_global_config
 
 
 def get_display_name(folder_path):
@@ -220,60 +45,102 @@ def get_display_name(folder_path):
     return os.path.basename(folder_path).replace("_", " ")
 
 
-def is_example_path(path):
-    """True if the given path points inside the read-only examples directory."""
-    return bool(path) and path.startswith(EXAMPLES_DIR)
+def save_button_class(is_example):
+    return "lf-btn lf-btn-warn" if not is_example else "lf-btn"
 
 
-def load_global_config():
-    """Loads configuration from the active project folder."""
-    default_params = {
-        'volcano': 'Volcano Name', 'lats_vent': 0.0, 'longs_vent': 0.0,
-        'start_day_str': '01/01/2026 00:00', 'end_day_str': '01/05/2026 23:59',
-        'filter_frp': 35, 'frp_filter_mode': 'gt', 'filter_track': 0.5, 'map_key': 'INSERT_YOUR_MAP_KEY_HERE',
-        'include_reference_radius': True, 'ref_radius_m': 5000,
-        'include_shapefile': False, 'shapefile_path': '',
-        'include_reference_waypoint': False,
-        'wpt_names': 'Reference Point', 'wpt_lats': 0.0, 'wpt_lons': 0.0, 'wpt_symbols': 'circle'
-    }
-
-    active_path = get_active_volcano_name()
-    config_path = None
-    if active_path:
-        folder_name = os.path.basename(active_path)
-        candidate = os.path.join(active_path, f"config_{folder_name}.txt")
-        if os.path.exists(candidate):
-            config_path = candidate
-
-    if not config_path or not os.path.exists(config_path):
-        return default_params
-
-    config = {}
-    with open(config_path, "r") as f:
-        for line in f:
-            if "=" in line and not line.startswith("#"):
-                parts = line.strip().split("=", 1)
-                if len(parts) == 2:
-                    k, v = parts
-                    # NOTE: do NOT strip commas/semicolons on wpt_* keys —
-                    # multi-waypoint support uses ';' as a separator.
-                    if v.lower() == 'true':
-                        config[k] = True
-                    elif v.lower() == 'false':
-                        config[k] = False
-                    else:
-                        try:
-                            config[k] = float(v) if "." in v else int(v)
-                        except ValueError:
-                            config[k] = v
-
-    final_cfg = default_params.copy()
-    final_cfg.update(config)
-    return final_cfg
+def volcano_input_style(volcano_value):
+    """Highlight the volcano name input once a real volcano has been selected."""
+    has_volcano = bool(volcano_value) and str(volcano_value).strip() not in ('', 'Volcano Name')
+    base = {'width': '100%'}
+    if has_volcano:
+        return {**base, 'border': '2px solid #27ae60', 'backgroundColor': '#eafaf1', 'fontWeight': 'bold'}
+    return base
 
 
-# Initialize Dashboard Instance
-app = dash.Dash(__name__, suppress_callback_exceptions=True)
+# ==========================================
+# 0b. WAYPOINT EDITOR HELPERS
+# ==========================================
+
+def parse_waypoints_for_editor(c):
+    """Waypoints for the Global Config editor. Never invents 0,0 coordinates:
+    an empty project shows a single blank row."""
+    wpts = lfc.parse_waypoints_from_config(c, keep_empty=True)
+    if not wpts:
+        wpts = [{'name': '', 'lat': None, 'lon': None, 'symbol': 'circle'}]
+    return wpts
+
+
+def render_waypoint_row(idx, wpt):
+    return html.Div([
+        html.Div([
+            html.Label(f"Waypoint {idx + 1} – name", className='lf-label'),
+            dcc.Input(id={'type': 'wpt-name', 'index': idx}, type='text',
+                      value=wpt.get('name', ''), placeholder='e.g. Vent NW', style={'width': '100%'})
+        ]),
+        html.Div([
+            html.Label("Latitude", className='lf-label'),
+            dcc.Input(id={'type': 'wpt-lat', 'index': idx}, type='number',
+                      value=wpt.get('lat'), placeholder='decimal °', style={'width': '100%'})
+        ]),
+        html.Div([
+            html.Label("Longitude", className='lf-label'),
+            dcc.Input(id={'type': 'wpt-lon', 'index': idx}, type='number',
+                      value=wpt.get('lon'), placeholder='decimal °', style={'width': '100%'})
+        ]),
+        html.Div([
+            html.Label("Symbol", className='lf-label'),
+            dcc.Dropdown(id={'type': 'wpt-symbol', 'index': idx},
+                         value=wpt.get('symbol', 'circle'), clearable=False,
+                         options=[{'label': '● Circle', 'value': 'circle'},
+                                  {'label': '▲ Triangle', 'value': 'triangle'},
+                                  {'label': '■ Square', 'value': 'square'}])
+        ]),
+        html.Div([
+            html.Button("Remove", id={'type': 'wpt-remove', 'index': idx}, n_clicks=0,
+                        className='lf-btn lf-btn-ghost lf-btn-sm')
+        ], style={'flex': '0 0 auto', 'minWidth': '0'}),
+    ], className='lf-wpt-row')
+
+
+def list_existing_projects():
+    """Scans examples/ and projects/ for valid volcano config files."""
+    projects = []
+    for base_dir, tag in [(PROJECTS_DIR, ""), (EXAMPLES_DIR, "  (example)")]:
+        if not os.path.isdir(base_dir):
+            continue
+        for item in sorted(os.listdir(base_dir)):
+            folder_path = os.path.join(base_dir, item)
+            if not os.path.isdir(folder_path) or item.startswith("."):
+                continue
+            if os.path.exists(os.path.join(folder_path, f"config_{item}.txt")):
+                projects.append({'label': f"{item.replace('_', ' ')}{tag}", 'value': folder_path})
+    return sorted(projects, key=lambda x: x['label'])
+
+
+def write_config_file(config_path, vol, latv, lonv, s_d, e_d, frp, frp_mode, trk, m_key,
+                      rad_on, rad_m, shp_on, shp_p, wpt_on, wpts):
+    names_str = ';'.join(str(w.get('name') or '') for w in wpts)
+    lats_str = ';'.join('' if w.get('lat') is None else str(w['lat']) for w in wpts)
+    lons_str = ';'.join('' if w.get('lon') is None else str(w['lon']) for w in wpts)
+    syms_str = ';'.join(str(w.get('symbol') or 'circle') for w in wpts)
+    with open(config_path, "w", encoding='utf-8') as f:
+        f.write(f"volcano={vol}\nlats_vent={latv}\nlongs_vent={lonv}\n")
+        f.write(f"start_day_str={s_d}\nend_day_str={e_d}\n")
+        f.write(f"filter_frp={frp}\nfrp_filter_mode={frp_mode}\nfilter_track={trk}\nmap_key={m_key}\n")
+        f.write(f"include_reference_radius={bool(rad_on)}\nref_radius_m={rad_m}\n")
+        f.write(f"include_shapefile={bool(shp_on)}\nshapefile_path={shp_p or ''}\n")
+        f.write(f"include_reference_waypoint={bool(wpt_on)}\n")
+        f.write(f"wpt_names={names_str}\nwpt_lats={lats_str}\nwpt_lons={lons_str}\nwpt_symbols={syms_str}\n")
+
+
+# ==========================================
+# APP
+# ==========================================
+app = dash.Dash(
+    __name__, suppress_callback_exceptions=True,
+    meta_tags=[{'name': 'viewport', 'content': 'width=device-width, initial-scale=1'}],
+)
 app.title = "LavaFlow Suite"
 
 active_v = get_active_volcano_name()
@@ -282,6 +149,8 @@ header_display = f"LavaFlow Mapper Suite: {active_v_display}" if active_v_displa
 
 anim_module.register_callbacks(app)
 anomalies_module.register_callbacks(app)
+mapper_module.register_callbacks(app)
+speed_module.register_callbacks(app)
 export_module.register_callbacks(app)
 
 app.layout = html.Div([
@@ -289,27 +158,137 @@ app.layout = html.Div([
     dcc.Store(id='store-mapper-status', data={'run': False}, storage_type='session'),
     dcc.Store(id='store-speed-status', data={'run': False}, storage_type='session'),
 
-    html.Div([
-        html.H1(id='main-header-title', children=header_display, style={'margin': '0', 'color': '#2c3e50'}),
-    ], style={'padding': '20px', 'backgroundColor': 'white', 'borderBottom': '2px solid #eee'}),
+    html.Div([html.H1(id='main-header-title', children=header_display)], className='lf-header'),
 
     dcc.Tabs(id="suite-tabs", value='tab-config', persistence=True, persistence_type='memory', children=[
-        dcc.Tab(label='⚙️ 1. Global Config', value='tab-config'),
-        dcc.Tab(label='🛰️ 2. FIRMS Download', value='tab-download'),
-        dcc.Tab(label='📈 3. Anomalies Count', value='tab-anomalies'),
-        dcc.Tab(label='📊 4. FRP Statistics', value='tab-stats'),
-        dcc.Tab(label='🌋 5. LavaFlow Mapper', value='tab-mapper'),
-        dcc.Tab(label='🗺️ 6. LavaFlow Propagation', value='tab-animation'),
-        dcc.Tab(label='🚀 7. Propagation Speed', value='tab-speed'),
-        dcc.Tab(label='📤 8. Export Report', value='tab-export'),
+        dcc.Tab(label='1. Global Config', value='tab-config'),
+        dcc.Tab(label='2. FIRMS Download', value='tab-download'),
+        dcc.Tab(label='3. Anomalies Count', value='tab-anomalies'),
+        dcc.Tab(label='4. FRP Statistics', value='tab-stats'),
+        dcc.Tab(label='5. LavaFlow Mapper', value='tab-mapper'),
+        dcc.Tab(label='6. LavaFlow Propagation', value='tab-animation'),
+        dcc.Tab(label='7. Propagation Speed', value='tab-speed'),
+        dcc.Tab(label='8. Export Report', value='tab-export'),
     ]),
-    html.Div(id='tabs-content-container', style={'padding': '20px'})
+    html.Div(id='tabs-content-container', className='lf-content')
 ])
 
 
 # ==========================================
-# 1. TAB RENDERING LOGIC
+# 1. TAB RENDERING
 # ==========================================
+def render_config_tab(c):
+    existing_projects = list_existing_projects()
+    active_path = get_active_volcano_name() or ""
+    is_example = is_example_path(active_path)
+    initial_waypoints = parse_waypoints_for_editor(c)
+    sd_val = str(c.get('start_day_str', '')).split()[0] if c.get('start_day_str') else ''
+    ed_val = str(c.get('end_day_str', '')).split()[0] if c.get('end_day_str') else ''
+
+    date_style = {'width': '130px', 'fontFamily': 'monospace'}
+
+    return html.Div([
+        # ---- Row 1: project & period | filters & API ----
+        html.Div([
+            html.Div([
+                html.H4("Project"),
+                html.Label("Load an existing project", className='lf-label'),
+                dcc.Dropdown(id='cfg-load-project', options=existing_projects, value=active_path or None,
+                             placeholder="Select project..."),
+                html.Label(["Or create a new one from the GVP catalogue ",
+                            html.A("[source]", href="https://volcano.si.edu/volcanolist_holocene.cfm",
+                                   target="_blank", className='lf-muted')], className='lf-label'),
+                dcc.Dropdown(id='cfg-volcano-search', options=gvp_options, placeholder="Search volcano name..."),
+
+                html.Label("Volcano name", className='lf-label'),
+                dcc.Input(id='cfg-volcano', value=c.get('volcano'), style=volcano_input_style(c.get('volcano'))),
+                html.Div([
+                    html.Div([html.Label("Vent latitude", className='lf-label'),
+                              dcc.Input(id='cfg-lat-vent', type='number', value=c.get('lats_vent'),
+                                        style={'width': '150px'})]),
+                    html.Div([html.Label("Vent longitude", className='lf-label'),
+                              dcc.Input(id='cfg-lon-vent', type='number', value=c.get('longs_vent'),
+                                        style={'width': '150px'})]),
+                ], className='lf-inline'),
+
+                html.Label("Analysis period (DD/MM/YYYY)", className='lf-label'),
+                html.Div([
+                    html.Div([html.Span("Start", className='lf-muted'), html.Br(),
+                              dcc.Input(id='cfg-date-start', type='text', debounce=True, value=sd_val,
+                                        placeholder='DD/MM/YYYY', style=date_style)]),
+                    html.Div([html.Span("End", className='lf-muted'), html.Br(),
+                              dcc.Input(id='cfg-date-end', type='text', debounce=True, value=ed_val,
+                                        placeholder='DD/MM/YYYY', style=date_style)]),
+                    html.Div([html.Span(" ", className='lf-muted'), html.Br(),
+                              html.Button("+1 d", id='btn-date-plus1', n_clicks=0, className='lf-btn lf-btn-ghost lf-btn-sm',
+                                          title="Advance end date one day", style={'marginRight': '6px'}),
+                              html.Button("+7 d", id='btn-date-plus7', n_clicks=0, className='lf-btn lf-btn-ghost lf-btn-sm',
+                                          title="Advance end date one week")]),
+                ], className='lf-inline'),
+                html.Div(id='cfg-date-validation', className='lf-muted', style={'minHeight': '16px', 'marginTop': '4px'}),
+            ], className='lf-card lf-col'),
+
+            html.Div([
+                html.H4("Filters"),
+                html.Label(["FRP threshold (MW) ",
+                            html.A("[ref]", href="https://doi.org/10.3390/rs14143483", target="_blank", className='lf-muted')],
+                           className='lf-label'),
+                dcc.RadioItems(id='cfg-frp-mode',
+                               options=[{'label': ' ≥ threshold (lava flows)', 'value': 'gt'},
+                                        {'label': ' ≤ threshold (other pyroclastic material)', 'value': 'lt'}],
+                               value=c.get('frp_filter_mode', 'gt'), labelStyle={'display': 'block'}),
+                dcc.Input(id='cfg-frp', type='number', value=c.get('filter_frp'), style={'width': '100px', 'marginTop': '6px'}),
+                html.Label(["Track (max. pixel size) ",
+                            html.A("[ref]", href="https://www.mdpi.com/2072-4292/9/10/974", target="_blank", className='lf-muted')],
+                           className='lf-label'),
+                dcc.Input(id='cfg-track', type='number', value=c.get('filter_track'), step=0.1, style={'width': '100px'}),
+
+                html.H4("FIRMS API", style={'marginTop': '18px'}),
+                html.Label(["MAP_KEY ",
+                            html.A("[get a key]", href="https://firms.modaps.eosdis.nasa.gov/api/map_key/",
+                                   target="_blank", className='lf-muted')], className='lf-label'),
+                dcc.Input(id='cfg-map-key', value=c.get('map_key'), style={'width': '100%', 'fontFamily': 'monospace'}),
+            ], className='lf-card lf-col'),
+        ], className='lf-row'),
+
+        # ---- Row 2: optional layers ----
+        html.Div([
+            html.H4("Optional map layers"),
+            html.P("These layers are off by default. Enable them once the values below are meaningful for your case study.",
+                   className='lf-note'),
+            html.Div([
+                dcc.Checklist(id='cfg-chk-rad', options=[{'label': ' Reference radius (m)', 'value': 'True'}],
+                              value=['True'] if c.get('include_reference_radius') else []),
+                dcc.Input(id='cfg-radius-m', type='number', value=c.get('ref_radius_m'), style={'width': '140px'}),
+            ], className='lf-inline', style={'marginBottom': '8px'}),
+            html.Div([
+                dcc.Checklist(id='cfg-chk-shp', options=[{'label': ' Shapefile (inside the project folder)', 'value': 'True'}],
+                              value=['True'] if c.get('include_shapefile') else []),
+                dcc.Input(id='cfg-shp-path', value=c.get('shapefile_path'), placeholder="name.shp",
+                          style={'width': 'min(360px, 100%)'}),
+            ], className='lf-inline', style={'marginBottom': '12px'}),
+
+            html.Div([
+                dcc.Checklist(id='cfg-chk-wpt', options=[{'label': ' Reference waypoints', 'value': 'True'}],
+                              value=['True'] if c.get('include_reference_waypoint') else []),
+                html.Button("+ Add waypoint", id='btn-add-wpt', n_clicks=0, className='lf-btn lf-btn-ghost lf-btn-sm'),
+            ], className='lf-inline', style={'marginBottom': '8px'}),
+            dcc.Store(id='wpt-list-store', data=initial_waypoints),
+            html.Div(id='wpt-container'),
+            html.P("Waypoints without coordinates are ignored, so the map always stays centred on the vent.",
+                   className='lf-muted'),
+        ], className='lf-card'),
+
+        html.Div([
+            html.Button("SAVE ALL PARAMETERS", id="btn-save-config", n_clicks=0, disabled=is_example,
+                        className=save_button_class(is_example)),
+            html.Span("Example project — read only. Create your own project from the GVP catalogue." if is_example else "",
+                      id='example-readonly-msg', className='lf-muted', style={'marginLeft': '12px'}),
+        ], className='lf-inline'),
+        html.Div(id="config-save-status", style={'marginTop': '10px', 'fontWeight': '600', 'color': '#27ae60'})
+    ])
+
+
 @app.callback(
     Output('tabs-content-container', 'children'),
     Input('suite-tabs', 'value'),
@@ -320,227 +299,59 @@ def render_tab(tab, stats_data, mapper_data, speed_data):
     c = load_global_config()
 
     if tab == 'tab-config':
-        existing_projects = list_existing_projects()
-        active_path = get_active_volcano_name() or ""
-        is_example = is_example_path(active_path)
-        initial_waypoints = parse_waypoints_from_config(c)
-
-        return html.Div([
-            html.Div([
-                # Left Column: Volcano Setup
-                html.Div([
-                    html.H4("📂 Load Existing Project", style={'color': '#2c3e50'}),
-                    dcc.Dropdown(id='cfg-load-project', options=existing_projects, placeholder="Select project...",
-                                 style={'marginBottom': '20px'}),
-                    html.Hr(),
-                    html.H4("🌋 Create / Edit Volcano Config", style={'color': '#2980b9'}),
-                    html.Label(["Search GVP: ",
-                                html.A("[Source]", href="https://volcano.si.edu/volcanolist_holocene.cfm",
-                                       target="_blank", style={'fontSize': '11px'})], style={'fontWeight': 'bold'}),
-                    dcc.Dropdown(id='cfg-volcano-search', options=gvp_options, placeholder="Auto-fill...",
-                                 style={'marginBottom': '10px'}),
-                    html.Label("Volcano Name: "),
-                    dcc.Input(id='cfg-volcano', value=c.get('volcano'),
-                              style=volcano_input_style(c.get('volcano'))),
-                    html.Div([
-                        html.Label("Vent Lat: "), dcc.Input(id='cfg-lat-vent', type='number', value=c.get('lats_vent'),
-                                                            style={'width': '80px', 'marginRight': '10px'}),
-                        html.Label("Vent Long: "),
-                        dcc.Input(id='cfg-lon-vent', type='number', value=c.get('longs_vent'), style={'width': '80px'})
-                    ]),
-                    html.Label("Analysis Period (DD/MM/YYYY):", style={'marginTop': '12px', 'display': 'block', 'fontWeight': 'bold'}),
-                    html.Div([
-                        html.Div([
-                            html.Label("Start date:", style={'fontSize': '12px', 'color': '#7f8c8d', 'marginBottom': '3px', 'display': 'block'}),
-                            dcc.Input(
-                                id='cfg-date-start', type='text', debounce=True,
-                                value=c.get('start_day_str', '').split()[0],
-                                placeholder='DD/MM/YYYY',
-                                style={'width': '130px', 'fontFamily': 'monospace', 'fontSize': '14px',
-                                       'padding': '6px 8px', 'border': '1px solid #ccc', 'borderRadius': '5px'}
-                            ),
-                        ], style={'marginRight': '20px'}),
-                        html.Div([
-                            html.Label("End date:", style={'fontSize': '12px', 'color': '#7f8c8d', 'marginBottom': '3px', 'display': 'block'}),
-                            html.Div([
-                                dcc.Input(
-                                    id='cfg-date-end', type='text', debounce=True,
-                                    value=c.get('end_day_str', '').split()[0],
-                                    placeholder='DD/MM/YYYY',
-                                    style={'width': '130px', 'fontFamily': 'monospace', 'fontSize': '14px',
-                                           'padding': '6px 8px', 'border': '1px solid #ccc', 'borderRadius': '5px',
-                                           'marginRight': '12px'}
-                                ),
-                                html.Button("+1d", id='btn-date-plus1', n_clicks=0, title="Advance end date +1 day",
-                                    style={'padding': '6px 9px', 'fontSize': '12px', 'fontWeight': 'bold',
-                                           'backgroundColor': '#3498db', 'color': 'white',
-                                           'border': 'none', 'borderRadius': '4px', 'cursor': 'pointer', 'marginRight': '8px'}),
-                                html.Button("+7d", id='btn-date-plus7', n_clicks=0, title="Advance end date +7 days",
-                                    style={'padding': '6px 9px', 'fontSize': '12px', 'fontWeight': 'bold',
-                                           'backgroundColor': '#27ae60', 'color': 'white',
-                                           'border': 'none', 'borderRadius': '4px', 'cursor': 'pointer'}),
-                            ], style={'display': 'flex', 'alignItems': 'center'}),
-                        ]),
-                    ], style={'display': 'flex', 'alignItems': 'flex-end', 'marginTop': '8px'}),
-                    html.Div(id='cfg-date-validation', style={'fontSize': '11px', 'marginTop': '5px', 'minHeight': '16px'})
-                ], style={'flex': '1.5', 'padding': '20px', 'border': '1px solid #eee', 'marginRight': '15px',
-                          'borderRadius': '10px'}),
-
-                # Right Column: Filters & API
-                html.Div([
-                    html.H4("Threshold Filters", style={'color': '#2980b9'}),
-                    html.Label(["FRP filter (MW): ",
-                                html.A("[Ref]", href="https://doi.org/10.3390/rs14143483", target="_blank",
-                                       style={'fontSize': '11px'})]),
-                    html.Div([
-                        dcc.RadioItems(
-                            id='cfg-frp-mode',
-                            options=[
-                                {'label': ' ≥ (for lava flows)', 'value': 'gt'},
-                                {'label': ' ≤ (other pyroclastic material)', 'value': 'lt'},
-                            ],
-                            value=c.get('frp_filter_mode', 'gt'),
-                            labelStyle={'display': 'block', 'fontSize': '14px'}
-                        ),
-                        dcc.Input(id='cfg-frp', type='number', value=c.get('filter_frp'),
-                                  style={'width': '80px', 'marginTop': '5px'})
-                    ], style={'marginBottom': '10px'}),
-                    html.Label(["Track: ",
-                                html.A("[Ref]", href="https://www.mdpi.com/2072-4292/9/10/974", target="_blank",
-                                       style={'fontSize': '11px'})]),
-                    dcc.Input(id='cfg-track', type='number', value=c.get('filter_track'), step=0.1,
-                              style={'width': '80px', 'display': 'block', 'marginBottom': '20px'}),
-
-                    html.Hr(),
-                    html.H4("API Credentials", style={'color': '#2980b9'}),
-                    html.Label(["FIRMS API MAP_KEY: ",
-                                html.A("[Get API Key]", href="https://firms.modaps.eosdis.nasa.gov/api/map_key/",
-                                       target="_blank", style={'fontSize': '11px'})]),
-                    dcc.Input(id='cfg-map-key', value=c.get('map_key'),
-                              style={'width': '100%', 'fontFamily': 'monospace', 'marginTop': '5px'})
-                ], style={'flex': '1', 'padding': '20px', 'border': '1px solid #eee', 'borderRadius': '10px'}),
-            ], style={'display': 'flex', 'marginBottom': '20px'}),
-
-            # Row 2: Geospatial & Waypoints
-            html.Div([
-                html.H4("Geospatial Layers & Reference Waypoints", style={'color': '#2980b9'}),
-                html.Div([
-                    dcc.Checklist(id='cfg-chk-rad', options=[{'label': ' Include Radius (m)', 'value': 'True'}],
-                                  value=['True'] if c.get('include_reference_radius') else []),
-                    dcc.Input(id='cfg-radius-m', type='number', value=c.get('ref_radius_m'),
-                              style={'width': '100px', 'marginLeft': '10px'})
-                ], style={'marginBottom': '15px'}),
-                html.Div([
-                    html.Label("Include Shapefile (include .shp): ", style={'fontWeight': 'bold'}),
-                    dcc.Checklist(id='cfg-chk-shp', options=[{'label': ' Show Shapefile', 'value': 'True'}],
-                                  value=['True'] if c.get('include_shapefile') else []),
-                    dcc.Input(id='cfg-shp-path', value=c.get('shapefile_path'), placeholder="Path/to/shapefile.shp",
-                              style={'width': '350px', 'marginLeft': '10px'})
-                ], style={'marginBottom': '25px'}),
-
-                # --- Multi-waypoint section ---
-                html.Div([
-                    html.Div([
-                        html.Label("Reference Waypoints:", style={'fontWeight': 'bold'}),
-                        dcc.Checklist(
-                            id='cfg-chk-wpt',
-                            options=[{'label': ' Show Waypoints', 'value': 'True'}],
-                            value=['True'] if c.get('include_reference_waypoint') else [],
-                            style={'marginLeft': '15px'}
-                        ),
-                        html.Button("+ Add Waypoint", id='btn-add-wpt', n_clicks=0,
-                            style={'marginLeft': 'auto', 'padding': '6px 14px',
-                                   'backgroundColor': '#27ae60', 'color': 'white',
-                                   'border': 'none', 'borderRadius': '4px',
-                                   'cursor': 'pointer', 'fontWeight': 'bold',
-                                   'fontSize': '13px'}),
-                    ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '12px'}),
-
-                    dcc.Store(id='wpt-list-store', data=initial_waypoints),
-                    html.Div(id='wpt-container'),
-                ], style={'padding': '15px', 'border': '1px solid #ddd', 'borderRadius': '5px',
-                          'backgroundColor': '#f9f9f9'})
-            ], style={'padding': '20px', 'border': '1px solid #eee', 'marginBottom': '20px', 'borderRadius': '10px'}),
-
-            html.Button("SAVE ALL PARAMETERS", id="btn-save-config", n_clicks=0,
-                        disabled=is_example,
-                        style=save_button_style(is_example)),
-            html.Div(
-                "📌 Example project — read only. Use GVP Search to create your own project." if is_example else "",
-                id='example-readonly-msg',
-                style={'marginTop': '10px', 'fontSize': '13px', 'color': '#7f8c8d', 'fontStyle': 'italic'}
-            ),
-            html.Div(id="config-save-status", style={'marginTop': '10px', 'fontWeight': 'bold', 'color': '#27ae60'})
-        ])
+        return render_config_tab(c)
 
     elif tab == 'tab-download':
         return html.Div([
-            html.H3("🛰️ Step 1: FIRMS Data Downloader"),
             html.Div([
-                html.P(["Updates volcano FIRMS records. Large ranges are automatically split into 5-day chunks. "
-                       "Please note that the API only provides access to data from the previous year. "
-                       "For records older than one year, use the ",
-                       html.A(
-                           "FIRMS Download Service",
-                           href= "https://firms.modaps.eosdis.nasa.gov/download/",
-                           target="_blank"
-                       ),
-                       "."
-                ], style={'fontSize': '16px'}),
-                html.Div([html.Label("Download Radius (m):"),
-                          dcc.Input(id='dl-radius', type='number', value=c.get('ref_radius_m', 10000),
-                                    style={'width': '150px', 'display': 'block', 'margin': '10px auto'})]),
+                html.H3("FIRMS data downloader"),
+                html.P(["Updates the project's FIRMS records. Large ranges are split into 5-day chunks. "
+                        "The API only serves the previous year; for older records use the ",
+                        html.A("FIRMS Download Service", href="https://firms.modaps.eosdis.nasa.gov/download/",
+                               target="_blank"), "."], className='lf-note'),
+                html.Label("Download radius (m)", className='lf-label'),
+                dcc.Input(id='dl-radius', type='number', value=c.get('ref_radius_m', 10000), style={'width': '150px'}),
+                html.Label("Date range", className='lf-label'),
                 dcc.DatePickerRange(id='dl-date-picker', start_date=date.today() - timedelta(days=4),
                                     end_date=date.today(), display_format='YYYY-MM-DD'),
                 html.Br(), html.Br(),
-                html.Button("START DOWNLOAD", id="btn-run-download", n_clicks=0,
-                            style={'backgroundColor': '#e67e22', 'color': 'white', 'padding': '12px 24px',
-                                   'border': 'none', 'borderRadius': '5px'}),
-            ], style={'padding': '20px', 'backgroundColor': '#f8f9fa', 'borderRadius': '10px',
-                      'border': '1px solid #ddd', 'maxWidth': '600px', 'margin': 'auto'}),
+                html.Button("START DOWNLOAD", id="btn-run-download", n_clicks=0, className='lf-btn lf-btn-warn'),
+            ], className='lf-card', style={'maxWidth': '620px', 'margin': '0 auto'}),
             dcc.Loading(html.Div(id="dl-output-log",
-                                 style={'marginTop': '20px', 'whiteSpace': 'pre-line', 'fontFamily': 'monospace'}))
-        ], style={'textAlign': 'center'})
+                                 style={'marginTop': '16px', 'whiteSpace': 'pre-line', 'fontFamily': 'monospace',
+                                        'fontSize': '12px'}))
+        ])
 
     elif tab == 'tab-anomalies':
-        try:
-            sd_str = c.get('start_day_str').split()[0]
-            ed_str = c.get('end_day_str').split()[0]
-            start_dt = datetime.strptime(sd_str, '%d/%m/%Y')
-            end_dt = datetime.strptime(ed_str, '%d/%m/%Y')
-        except:
+        start_dt, end_dt = lfc.get_period(c)
+        if pd.isna(start_dt) or pd.isna(end_dt):
             start_dt, end_dt = datetime(2026, 1, 1), datetime(2026, 5, 1)
         return anomalies_module.get_layout(start_date=start_dt, end_date=end_dt)
 
     elif tab == 'tab-stats':
         initial_content = stats_module.get_layout() if stats_data['run'] else html.P(
-            "No results yet. Click run to generate statistics.")
-        return html.Div([html.Button("RUN FRP STATISTICS", id="btn-run-stats", n_clicks=0,
-                                     style={'padding': '10px 20px', 'backgroundColor': '#3498db', 'color': 'white',
-                                            'border': 'none', 'borderRadius': '5px', 'marginBottom': '20px'}),
-                         dcc.Loading(html.Div(id="out-stats-results", children=initial_content))],
-                        style={'textAlign': 'center'})
+            "No results yet. Click run to generate the statistics.", className='lf-note')
+        return html.Div([html.Button("RUN FRP STATISTICS", id="btn-run-stats", n_clicks=0, className='lf-btn'),
+                         dcc.Loading(html.Div(id="out-stats-results", children=initial_content,
+                                              style={'marginTop': '14px'}))])
 
     elif tab == 'tab-mapper':
         initial_content = mapper_module.get_layout() if mapper_data['run'] else html.P(
-            "No results yet. Click run to generate the map.")
-        return html.Div([html.Button("RUN MAPPER ENGINE", id="btn-run-mapper", n_clicks=0,
-                                     style={'padding': '10px 20px', 'backgroundColor': '#27ae60', 'color': 'white',
-                                            'border': 'none', 'borderRadius': '5px'}),
-                         dcc.Loading(html.Div(id="out-mapper-results", children=initial_content))],
-                        style={'textAlign': 'center'})
+            "No results yet. Click run to generate the map.", className='lf-note')
+        return html.Div([html.Button("RUN MAPPER ENGINE", id="btn-run-mapper", n_clicks=0, className='lf-btn lf-btn-ok'),
+                         dcc.Loading(html.Div(id="out-mapper-results", children=initial_content,
+                                              style={'marginTop': '14px'}))])
 
     elif tab == 'tab-animation':
         return anim_module.get_layout()
 
     elif tab == 'tab-speed':
         initial_content = speed_module.get_layout() if speed_data['run'] else html.P(
-            "No results yet. Run Mapper first.")
+            "No results yet. Run the Mapper first, then calculate the speed.", className='lf-note')
         return html.Div([html.Button("CALCULATE SPEED", id="btn-run-speed", n_clicks=0,
-                                     style={'padding': '10px 20px', 'backgroundColor': '#9b59b6', 'color': 'white',
-                                            'border': 'none', 'borderRadius': '5px', 'marginBottom': '20px'}),
-                         dcc.Loading(html.Div(id="out-speed-results", children=initial_content))],
-                        style={'textAlign': 'center'})
+                                     className='lf-btn', style={'backgroundColor': '#8e44ad'}),
+                         dcc.Loading(html.Div(id="out-speed-results", children=initial_content,
+                                              style={'marginTop': '14px'}))])
 
     elif tab == 'tab-export':
         return export_module.get_layout()
@@ -557,40 +368,54 @@ def render_tab(tab, stats_data, mapper_data, speed_data):
      Output('cfg-frp', 'value', allow_duplicate=True),
      Output('cfg-track', 'value', allow_duplicate=True),
      Output('cfg-radius-m', 'value', allow_duplicate=True),
+     Output('cfg-chk-rad', 'value', allow_duplicate=True),
+     Output('cfg-chk-shp', 'value', allow_duplicate=True),
+     Output('cfg-chk-wpt', 'value', allow_duplicate=True),
      Output('cfg-date-start', 'value', allow_duplicate=True),
      Output('cfg-date-end', 'value', allow_duplicate=True),
      Output('cfg-shp-path', 'value', allow_duplicate=True),
      Output('wpt-list-store', 'data', allow_duplicate=True),
      Output('config-save-status', 'children', allow_duplicate=True),
-     Output('main-header-title', 'children', allow_duplicate=True)],
+     Output('main-header-title', 'children', allow_duplicate=True),
+     Output('cfg-load-project', 'options', allow_duplicate=True),
+     Output('cfg-load-project', 'value', allow_duplicate=True)],
     Input('cfg-volcano-search', 'value'),
+    State('cfg-map-key', 'value'),
     prevent_initial_call=True
 )
-def gvp_search_cb(selected_volcano):
-    """GVP Search: Fills defaults and creates config folder inside projects/."""
-    if not selected_volcano or df_gvp.empty: return [no_update] * 12
+def gvp_search_cb(selected_volcano, current_key):
+    """GVP search: creates a new project folder inside projects/ with safe defaults
+    (optional layers OFF, no placeholder waypoints) and makes it active."""
+    if not selected_volcano or df_gvp.empty:
+        return [no_update] * 17
     row = df_gvp[df_gvp['Volcano Name'] == selected_volcano].iloc[0]
-    lat, lon = row['Latitude'], row['Longitude']
-    folder_name = selected_volcano.strip().replace(" ", "_")
+    lat, lon = float(row['Latitude']), float(row['Longitude'])
+    folder_name = lfc.safe_name(selected_volcano.strip().replace(" ", "_"))
     folder_path = os.path.join(PROJECTS_DIR, folder_name)
     os.makedirs(folder_path, exist_ok=True)
-    with open("active_volcano.txt", "w") as f:
-        f.write(folder_path)
-    config_path = os.path.join(folder_path, f"config_{folder_name}.txt")
+    lfc.set_active_folder(folder_path)
+    config_path = lfc.config_path_for(folder_path)
 
+    d = lfc.DEFAULT_CONFIG
+    key = current_key if current_key and current_key != d['map_key'] else d['map_key']
     if not os.path.exists(config_path):
-        with open(config_path, "w") as f:
-            f.write(f"volcano={selected_volcano}\nlats_vent={lat}\nlongs_vent={lon}\n")
-            f.write("start_day_str=01/01/2026 00:00\nend_day_str=01/05/2026 23:59\nfilter_frp=35\nfilter_track=0.5\n")
-            f.write("include_reference_radius=True\nref_radius_m=5000\ninclude_shapefile=False\nshapefile_path=\n")
-            f.write("include_reference_waypoint=False\nwpt_names=\nwpt_lats=0.0\nwpt_lons=0.0\nwpt_symbols=circle\n")
+        write_config_file(config_path, selected_volcano, lat, lon, d['start_day_str'], d['end_day_str'],
+                          d['filter_frp'], d['frp_filter_mode'], d['filter_track'], key,
+                          False, d['ref_radius_m'], False, '', False,
+                          [{'name': '', 'lat': None, 'lon': None, 'symbol': 'circle'}])
 
-    initial_waypoints = [{'name': '', 'lat': 0.0, 'lon': 0.0, 'symbol': 'circle'}]
-    return (selected_volcano, lat, lon, 35, 0.5, 5000,
-            "01/01/2026", "01/05/2026", "",
-            initial_waypoints,
-            f"New volcano project initialized: {selected_volcano}",
-            f"LavaFlow Mapper Suite: {selected_volcano}")
+    c = load_global_config()
+    return (c.get('volcano'), c.get('lats_vent'), c.get('longs_vent'), c.get('filter_frp'), c.get('filter_track'),
+            c.get('ref_radius_m'),
+            ['True'] if c.get('include_reference_radius') else [],
+            ['True'] if c.get('include_shapefile') else [],
+            ['True'] if c.get('include_reference_waypoint') else [],
+            str(c.get('start_day_str')).split()[0], str(c.get('end_day_str')).split()[0],
+            c.get('shapefile_path', ''),
+            parse_waypoints_for_editor(c),
+            f"New project initialised: {selected_volcano} (saved in {folder_path})",
+            f"LavaFlow Mapper Suite: {selected_volcano}",
+            list_existing_projects(), folder_path)
 
 
 @app.callback(
@@ -614,60 +439,43 @@ def gvp_search_cb(selected_volcano):
     Input('cfg-load-project', 'value'),
     prevent_initial_call=True
 )
-def load_existing_project_cb(selected_volcano):
-    if not selected_volcano: return [no_update] * 17
-    with open("active_volcano.txt", "w") as f:
-        f.write(selected_volcano)
+def load_existing_project_cb(selected_project):
+    if not selected_project or selected_project == (get_active_volcano_name() or ""):
+        return [no_update] * 17
+    lfc.set_active_folder(selected_project)
     c = load_global_config()
-    shp_v = ['True'] if c.get('include_shapefile') else []
-    rad_v = ['True'] if c.get('include_reference_radius') else []
-    wpt_v = ['True'] if c.get('include_reference_waypoint') else []
-    sd = c.get('start_day_str', '01/01/2026 00:00').split()[0]
-    ed = c.get('end_day_str', '01/05/2026 00:00').split()[0]
-    display_name = get_display_name(selected_volcano)
-    waypoints = parse_waypoints_from_config(c)
-
+    display_name = get_display_name(selected_project)
     return (c.get('volcano'), c.get('lats_vent'), c.get('longs_vent'),
             c.get('filter_frp'), c.get('filter_track'), c.get('frp_filter_mode', 'gt'),
-            shp_v, c.get('shapefile_path'),
-            c.get('map_key'), sd, ed, rad_v, c.get('ref_radius_m'), wpt_v,
-            waypoints,
+            ['True'] if c.get('include_shapefile') else [], c.get('shapefile_path', ''),
+            c.get('map_key'),
+            str(c.get('start_day_str')).split()[0], str(c.get('end_day_str')).split()[0],
+            ['True'] if c.get('include_reference_radius') else [], c.get('ref_radius_m'),
+            ['True'] if c.get('include_reference_waypoint') else [],
+            parse_waypoints_for_editor(c),
             f"Loaded project: {display_name}",
             f"LavaFlow Mapper Suite: {display_name}")
 
 
-# ------------------------------------------
-# SAVE button state — dynamically enable/disable when the active project changes.
-# Without this, the disabled state computed at tab render time would persist
-# even after the user switches from an example to a new project.
-# ------------------------------------------
 @app.callback(
     [Output('btn-save-config', 'disabled'),
-     Output('btn-save-config', 'style'),
+     Output('btn-save-config', 'className'),
      Output('example-readonly-msg', 'children')],
     [Input('cfg-volcano-search', 'value'),
      Input('cfg-load-project', 'value')],
     prevent_initial_call=True
 )
 def update_save_button_state(gvp_selected, loaded_project):
-    """
-    Re-evaluates the SAVE button state when the user picks a project:
-      - GVP Search → always creates inside projects/, so button is enabled.
-      - Load Existing → enabled unless the path is under examples/.
-    """
     from dash import ctx
     trigger = ctx.triggered_id
-
     if trigger == 'cfg-volcano-search' and gvp_selected:
         is_example = False
     elif trigger == 'cfg-load-project' and loaded_project:
         is_example = is_example_path(loaded_project)
     else:
         return no_update, no_update, no_update
-
-    msg = ("📌 Example project — read only. Use GVP Search to create your own project."
-           if is_example else "")
-    return is_example, save_button_style(is_example), msg
+    msg = "Example project — read only. Create your own project from the GVP catalogue." if is_example else ""
+    return is_example, save_button_class(is_example), msg
 
 
 @app.callback(
@@ -680,97 +488,99 @@ def update_save_button_state(gvp_selected, loaded_project):
      State('cfg-chk-rad', 'value'), State('cfg-radius-m', 'value'),
      State('cfg-chk-shp', 'value'), State('cfg-shp-path', 'value'),
      State('cfg-chk-wpt', 'value'),
-     State({'type': 'wpt-name',   'index': ALL}, 'value'),
-     State({'type': 'wpt-lat',    'index': ALL}, 'value'),
-     State({'type': 'wpt-lon',    'index': ALL}, 'value'),
+     State({'type': 'wpt-name', 'index': ALL}, 'value'),
+     State({'type': 'wpt-lat', 'index': ALL}, 'value'),
+     State({'type': 'wpt-lon', 'index': ALL}, 'value'),
      State({'type': 'wpt-symbol', 'index': ALL}, 'value')],
     prevent_initial_call=True
 )
 def save_all(n, vol, latv, lonv, sd, ed, frp, frp_mode, trk, m_key,
              rad_chk, rad_m, shp_chk, shp_p, wpt_chk,
              wpt_names, wpt_lats, wpt_lons, wpt_syms):
-    if n > 0:
-        folder_name = vol.strip().replace(" ", "_")
-        active_path = get_active_volcano_name() or ""
+    if not n:
+        return no_update, no_update
+    if not vol or not str(vol).strip() or str(vol).strip() == 'Volcano Name':
+        return "Please enter a volcano name (or pick one from the GVP catalogue).", no_update
+    if latv is None or lonv is None:
+        return "Please enter the vent coordinates before saving.", no_update
 
-        if is_example_path(active_path):
-            return (
-                "⚠️ Examples are read-only. To create your own project, use the GVP Search above.",
-                no_update
-            )
+    active_path = get_active_volcano_name() or ""
+    if is_example_path(active_path):
+        return ("Examples are read-only. To create your own project, use the GVP search above.", no_update)
 
-        folder_path = os.path.join(PROJECTS_DIR, folder_name)
+    # Save into the active project folder; create one only if none is active.
+    if active_path and os.path.isdir(active_path):
+        folder_path = active_path
+    else:
+        folder_path = os.path.join(PROJECTS_DIR, lfc.safe_name(str(vol).strip().replace(" ", "_")))
         os.makedirs(folder_path, exist_ok=True)
-        config_path = os.path.join(folder_path, f"config_{folder_name}.txt")
+    config_path = lfc.config_path_for(folder_path)
 
-        try:
-            datetime.strptime(sd.strip(), '%d/%m/%Y')
-            s_d = sd.strip() + " 00:00"
-        except:
-            s_d = "01/01/2026 00:00"
-        try:
-            datetime.strptime(ed.strip(), '%d/%m/%Y')
-            e_d = ed.strip() + " 23:59"
-        except:
-            e_d = "01/05/2026 23:59"
+    try:
+        datetime.strptime(sd.strip(), '%d/%m/%Y')
+        s_d = sd.strip() + " 00:00"
+    except Exception:
+        return "Start date must be DD/MM/YYYY.", no_update
+    try:
+        datetime.strptime(ed.strip(), '%d/%m/%Y')
+        e_d = ed.strip() + " 23:59"
+    except Exception:
+        return "End date must be DD/MM/YYYY.", no_update
 
-        names_str = ';'.join([str(w or '') for w in (wpt_names or [])])
-        lats_str  = ';'.join([str(w if w is not None else 0.0) for w in (wpt_lats or [])])
-        lons_str  = ';'.join([str(w if w is not None else 0.0) for w in (wpt_lons or [])])
-        syms_str  = ';'.join([str(w or 'circle') for w in (wpt_syms or [])])
+    wpts = []
+    for i in range(len(wpt_names or [])):
+        wpts.append({'name': wpt_names[i] or '', 'lat': wpt_lats[i], 'lon': wpt_lons[i],
+                     'symbol': wpt_syms[i] or 'circle'})
+    wpt_on = 'True' in (wpt_chk or []) and any(w['lat'] is not None and w['lon'] is not None for w in wpts)
 
-        with open(config_path, "w") as f:
-            f.write(f"volcano={vol}\nlats_vent={latv}\nlongs_vent={lonv}\n")
-            f.write(f"start_day_str={s_d}\nend_day_str={e_d}\nfilter_frp={frp}\nfrp_filter_mode={frp_mode}\nfilter_track={trk}\nmap_key={m_key}\n")
-            f.write(f"include_reference_radius={'True' in (rad_chk or [])}\nref_radius_m={rad_m}\n")
-            f.write(f"include_shapefile={'True' in (shp_chk or [])}\nshapefile_path={str(shp_p or '')}\n")
-            f.write(f"include_reference_waypoint={'True' in (wpt_chk or [])}\n")
-            f.write(f"wpt_names={names_str}\nwpt_lats={lats_str}\nwpt_lons={lons_str}\nwpt_symbols={syms_str}\n")
+    write_config_file(config_path, vol, latv, lonv, s_d, e_d, frp, frp_mode, trk, m_key,
+                      'True' in (rad_chk or []), rad_m, 'True' in (shp_chk or []), shp_p, wpt_on, wpts)
+    lfc.set_active_folder(folder_path)
 
-        with open("active_volcano.txt", "w") as f:
-            f.write(folder_path)
-
-        return f"✅ Research project saved: {vol}", f"LavaFlow Mapper Suite: {vol}"
-    return no_update, no_update
+    extra = "" if wpt_on or 'True' not in (wpt_chk or []) else " (waypoints disabled: no coordinates given)"
+    return f"Project saved: {vol} → {config_path}{extra}", f"LavaFlow Mapper Suite: {vol}"
 
 
 @app.callback(Output("dl-output-log", "children"), Input("btn-run-download", "n_clicks"),
               [State('dl-date-picker', 'start_date'), State('dl-date-picker', 'end_date'), State('dl-radius', 'value')],
               prevent_initial_call=True)
 def dl_cb(n, s, e, radius):
-    if n > 0: return download_logic.process_download(s.split('T')[0], e.split('T')[0], radius or 10000)
+    if n > 0:
+        return download_logic.process_download(s.split('T')[0], e.split('T')[0], radius or 10000)
     return ""
 
 
 @app.callback([Output("out-stats-results", "children"), Output('store-stats-status', 'data')],
               Input("btn-run-stats", "n_clicks"), prevent_initial_call=True)
 def stats_cb(n):
-    if n > 0: return stats_module.get_layout(), {'run': True}
+    if n > 0:
+        return stats_module.get_layout(), {'run': True}
     return no_update, no_update
 
 
 @app.callback([Output("out-mapper-results", "children"), Output('store-mapper-status', 'data')],
               Input("btn-run-mapper", "n_clicks"), prevent_initial_call=True)
 def mapper_cb(n):
-    if n > 0: return mapper_module.get_layout(), {'run': True}
+    if n > 0:
+        return mapper_module.get_layout(), {'run': True}
     return no_update, no_update
 
 
 @app.callback([Output("out-speed-results", "children"), Output('store-speed-status', 'data')],
               Input("btn-run-speed", "n_clicks"), prevent_initial_call=True)
 def speed_cb(n):
-    if n > 0: return speed_module.get_layout(), {'run': True}
+    if n > 0:
+        return speed_module.get_layout(), {'run': True}
     return no_update, no_update
 
 
 # ==========================================
-# 3. DATE QUICK-ADVANCE CALLBACKS
+# 3. DATE HELPERS
 # ==========================================
 
 @app.callback(
     Output('cfg-date-end', 'value', allow_duplicate=True),
-    [Input('btn-date-plus1', 'n_clicks'),
-     Input('btn-date-plus7', 'n_clicks')],
+    [Input('btn-date-plus1', 'n_clicks'), Input('btn-date-plus7', 'n_clicks')],
     State('cfg-date-end', 'value'),
     prevent_initial_call=True
 )
@@ -782,149 +592,88 @@ def advance_end_date(n1, n7, current_end):
         dt = datetime.strptime(current_end.strip(), '%d/%m/%Y')
     except ValueError:
         return no_update
-    triggered = ctx.triggered_id
-    if triggered == 'btn-date-plus1':
-        dt += timedelta(days=1)
-    elif triggered == 'btn-date-plus7':
-        dt += timedelta(days=7)
+    dt += timedelta(days=1 if ctx.triggered_id == 'btn-date-plus1' else 7)
     return dt.strftime('%d/%m/%Y')
 
 
 @app.callback(
-    [Output('cfg-date-start', 'style', allow_duplicate=True),
-     Output('cfg-date-end', 'style', allow_duplicate=True),
-     Output('cfg-date-validation', 'children')],
-    [Input('cfg-date-start', 'value'),
-     Input('cfg-date-end', 'value')],
+    Output('cfg-date-validation', 'children'),
+    [Input('cfg-date-start', 'value'), Input('cfg-date-end', 'value')],
     prevent_initial_call=True
 )
 def validate_dates(sd, ed):
-    base_style = {'width': '130px', 'fontFamily': 'monospace', 'fontSize': '14px',
-                  'padding': '6px 8px', 'borderRadius': '5px', 'marginRight': '12px'}
-    ok_style  = {**base_style, 'border': '1px solid #27ae60'}
-    err_style = {**base_style, 'border': '2px solid #e74c3c'}
-    neu_style = {**base_style, 'border': '1px solid #ccc'}
-
-    sd_ok = ed_ok = False
     sd_dt = ed_dt = None
     try:
-        sd_dt = datetime.strptime((sd or '').strip(), '%d/%m/%Y'); sd_ok = True
+        sd_dt = datetime.strptime((sd or '').strip(), '%d/%m/%Y')
     except ValueError:
         pass
     try:
-        ed_dt = datetime.strptime((ed or '').strip(), '%d/%m/%Y'); ed_ok = True
+        ed_dt = datetime.strptime((ed or '').strip(), '%d/%m/%Y')
     except ValueError:
         pass
-
-    if sd_ok and ed_ok and ed_dt <= sd_dt:
-        msg = html.Span("⚠️ End date must be after start date.", style={'color': '#e74c3c'})
-        return err_style, err_style, msg
-
-    if not sd and not ed:
-        return neu_style, neu_style, ""
-
-    s_style = ok_style if sd_ok else (err_style if sd else neu_style)
-    e_style = ok_style if ed_ok else (err_style if ed else neu_style)
-
-    if sd_ok and ed_ok:
-        delta = (ed_dt - sd_dt).days
-        msg = html.Span(f"✅ Period: {delta} days ({sd_dt.strftime('%d %b %Y')} → {ed_dt.strftime('%d %b %Y')})",
-                        style={'color': '#27ae60'})
-    elif not sd_ok and sd:
-        msg = html.Span("⚠️ Start date: use DD/MM/YYYY format.", style={'color': '#e74c3c'})
-    elif not ed_ok and ed:
-        msg = html.Span("⚠️ End date: use DD/MM/YYYY format.", style={'color': '#e74c3c'})
-    else:
-        msg = ""
-    return s_style, e_style, msg
+    if sd_dt and ed_dt:
+        if ed_dt <= sd_dt:
+            return html.Span("End date must be after the start date.", style={'color': '#c0392b'})
+        return html.Span(f"Period: {(ed_dt - sd_dt).days} days "
+                         f"({sd_dt.strftime('%d %b %Y')} → {ed_dt.strftime('%d %b %Y')})", style={'color': '#27ae60'})
+    if sd and not sd_dt:
+        return html.Span("Start date: use DD/MM/YYYY.", style={'color': '#c0392b'})
+    if ed and not ed_dt:
+        return html.Span("End date: use DD/MM/YYYY.", style={'color': '#c0392b'})
+    return ""
 
 
-# ==========================================
-# 4. VOLCANO NAME HIGHLIGHT CALLBACK
-# ==========================================
-
-@app.callback(
-    Output('cfg-volcano', 'style'),
-    Input('cfg-volcano', 'value'),
-    prevent_initial_call=True
-)
+@app.callback(Output('cfg-volcano', 'style'), Input('cfg-volcano', 'value'), prevent_initial_call=True)
 def highlight_volcano_name(volcano_value):
     return volcano_input_style(volcano_value)
 
 
 # ==========================================
-# 5. DYNAMIC WAYPOINT CALLBACKS
+# 4. WAYPOINT EDITOR CALLBACKS
 # ==========================================
 
-@app.callback(
-    Output('wpt-container', 'children'),
-    Input('wpt-list-store', 'data')
-)
+@app.callback(Output('wpt-container', 'children'), Input('wpt-list-store', 'data'))
 def render_waypoint_container(waypoints):
-    """Rebuilds the waypoint rows from the store whenever it changes."""
     if not waypoints:
-        return html.Div(
-            "No waypoints. Click + Add Waypoint to add one.",
-            style={'color': '#999', 'fontStyle': 'italic',
-                   'padding': '12px', 'textAlign': 'center'}
-        )
+        return html.Div("No waypoints. Click “+ Add waypoint” to add one.", className='lf-muted',
+                        style={'padding': '8px'})
     return [render_waypoint_row(i, w) for i, w in enumerate(waypoints)]
+
+
+def _collect_wpts(names, lats, lons, syms, skip=None):
+    out = []
+    for i in range(len(names or [])):
+        if i == skip:
+            continue
+        out.append({'name': names[i] or '', 'lat': lats[i], 'lon': lons[i], 'symbol': syms[i] or 'circle'})
+    return out
 
 
 @app.callback(
     Output('wpt-list-store', 'data', allow_duplicate=True),
     Input('btn-add-wpt', 'n_clicks'),
-    [State({'type': 'wpt-name',   'index': ALL}, 'value'),
-     State({'type': 'wpt-lat',    'index': ALL}, 'value'),
-     State({'type': 'wpt-lon',    'index': ALL}, 'value'),
-     State({'type': 'wpt-symbol', 'index': ALL}, 'value')],
+    [State({'type': 'wpt-name', 'index': ALL}, 'value'), State({'type': 'wpt-lat', 'index': ALL}, 'value'),
+     State({'type': 'wpt-lon', 'index': ALL}, 'value'), State({'type': 'wpt-symbol', 'index': ALL}, 'value')],
     prevent_initial_call=True
 )
 def add_waypoint_cb(n, names, lats, lons, syms):
-    """Reads current input values to preserve typed input, then appends a new empty waypoint."""
-    waypoints = []
-    for i in range(len(names)):
-        waypoints.append({
-            'name': names[i] or '',
-            'lat':  lats[i] if lats[i] is not None else 0.0,
-            'lon':  lons[i] if lons[i] is not None else 0.0,
-            'symbol': syms[i] or 'circle',
-        })
-    waypoints.append({'name': '', 'lat': 0.0, 'lon': 0.0, 'symbol': 'circle'})
-    return waypoints
+    wpts = _collect_wpts(names, lats, lons, syms)
+    wpts.append({'name': '', 'lat': None, 'lon': None, 'symbol': 'circle'})
+    return wpts
 
 
 @app.callback(
     Output('wpt-list-store', 'data', allow_duplicate=True),
     Input({'type': 'wpt-remove', 'index': ALL}, 'n_clicks'),
-    [State({'type': 'wpt-name',   'index': ALL}, 'value'),
-     State({'type': 'wpt-lat',    'index': ALL}, 'value'),
-     State({'type': 'wpt-lon',    'index': ALL}, 'value'),
-     State({'type': 'wpt-symbol', 'index': ALL}, 'value')],
+    [State({'type': 'wpt-name', 'index': ALL}, 'value'), State({'type': 'wpt-lat', 'index': ALL}, 'value'),
+     State({'type': 'wpt-lon', 'index': ALL}, 'value'), State({'type': 'wpt-symbol', 'index': ALL}, 'value')],
     prevent_initial_call=True
 )
 def remove_waypoint_cb(n_clicks_list, names, lats, lons, syms):
-    """Pattern-matched remove: drops the waypoint at the clicked index."""
     from dash import ctx
-    if not ctx.triggered_id or not isinstance(ctx.triggered_id, dict):
+    if not isinstance(ctx.triggered_id, dict) or not any(n for n in (n_clicks_list or []) if n):
         return no_update
-    if not any(n for n in (n_clicks_list or []) if n):
-        return no_update
-    remove_idx = ctx.triggered_id.get('index')
-    if remove_idx is None:
-        return no_update
-
-    waypoints = []
-    for i in range(len(names)):
-        if i == remove_idx:
-            continue
-        waypoints.append({
-            'name': names[i] or '',
-            'lat':  lats[i] if lats[i] is not None else 0.0,
-            'lon':  lons[i] if lons[i] is not None else 0.0,
-            'symbol': syms[i] or 'circle',
-        })
-    return waypoints
+    return _collect_wpts(names, lats, lons, syms, skip=ctx.triggered_id.get('index'))
 
 
 if __name__ == '__main__':
