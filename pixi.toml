@@ -11,7 +11,7 @@ python = "3.11.4"
 
 # --- Web app framework ---
 dash = ">=2.11.0"
-dash-leaflet = ">=0.1.21"
+dash-leaflet = ">=1.0"
  
 # --- Data manipulation ---
 pandas = ">=2.0.0"
@@ -27,6 +27,11 @@ plotly = ">=5.15.0"
 folium = ">=0.14.0"
 branca = ">=0.6.0"
  
+# --- Video rendering (LavaFlow Propagation -> MP4) ---
+matplotlib = ">=3.7"
+pillow = ">=9.0"
+imageio-ffmpeg = ">=0.4.8"
+
 # --- Geospatial shapefile support ---
 geopandas = ">=0.13.0"
 shapely = ">=2.0.1"
