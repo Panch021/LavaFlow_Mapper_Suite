@@ -304,7 +304,7 @@ def get_layout():
 
     fig.update_layout(
         height=1400,
-        width=990,
+        autosize=True,
         title=dict(
             text=f"FRP Statistical Analysis: {volcano_name}<br>Period: {start_str} - {end_str}",
             x=0.5, font=dict(size=22)
@@ -329,8 +329,9 @@ def get_layout():
 
     return html.Div([
         summary_header,
-        dcc.Graph(figure=fig, config=master_config)
-    ], style={'padding': '10px'})
+        html.Div(dcc.Graph(figure=fig, config={**master_config, 'responsive': True},
+                           style={'height': '1400px'}), className='lf-card', style={'maxWidth': '1100px'})
+    ])
 
 
 # ==========================================
