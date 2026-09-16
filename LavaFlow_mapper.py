@@ -1,779 +1,536 @@
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import folium
-from dash import html, dcc
+"""
+LavaFlow_mapper.py
+==================
+Filters the FIRMS VIIRS detections of the active project, computes the
+distance of each anomaly to the vent, saves the results
+(filter_VIIRS_combined.csv, max_distance_per_day_VIIRS.csv) and shows:
+
+  * an interactive folium map (anomalies coloured by date),
+  * FRP and distance time series whose mean / P95 / max statistics are
+    recomputed for the time window currently visible on screen
+    (zoom, pan or reset).
+
+The figure and map builders are reused by Export_report.py so the HTML
+report is identical to what the user sees in the app.
+"""
 import glob
 import os
 
-# Robust import for geometric symbols
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import folium
+import branca.colormap as bcm
+from dash import html, dcc, Input, Output, no_update
+
 try:
     from folium.plugins import RegularPolygonMarker
 except ImportError:
     from folium.features import RegularPolygonMarker
-import branca.colormap as bcm
 
+import lavaflow_common as lfc
 
-# ==========================================
-# 0. CONFIGURATION LOADER
-# ==========================================
-def get_active_folder():
-    """
-    Returns the full relative folder path of the active project
-    (e.g. 'projects/Wolf_2022' or 'examples/Sangay_2023').
-    Works with both the new path-based active_volcano.txt and legacy name-only entries.
-    """
-    if os.path.exists("active_volcano.txt"):
-        with open("active_volcano.txt", "r") as f:
-            path = f.read().strip()
-        if os.path.isdir(path):
-            return path  # new format: full relative path
-        # Legacy fallback: treat as bare folder name in root
-        legacy = path.replace(" ", "_")
-        if os.path.isdir(legacy):
-            return legacy
-    return None
-
-
-def load_global_config():
-    """Reads variables from the specific volcano config file inside its folder."""
-    config = {}
-    folder = get_active_folder()
-    if not folder:
-        return config
-    folder_name = os.path.basename(folder)  # e.g. 'Wolf_2022'
-    config_path = os.path.join(folder, f"config_{folder_name}.txt")
-
-    if not os.path.exists(config_path):
-        return config
-
-    with open(config_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                key, value = line.split("=", 1)
-                val = value.strip()
-                if val.lower() == 'true':
-                    config[key.strip()] = True
-                elif val.lower() == 'false':
-                    config[key.strip()] = False
-                else:
-                    try:
-                        config[key.strip()] = float(val) if "." in val else int(val)
-                    except ValueError:
-                        config[key.strip()] = val
-    return config
-
-
-# ==========================================
-# 0b. MULTI-WAYPOINT PARSER
-# ==========================================
-def parse_waypoints_from_config(c):
-    """
-    Parses waypoints from the config dict. Supports both:
-      - Legacy single-waypoint format: wpt_names=Foo, wpt_lats=1.0, ...
-      - New multi-waypoint format:    wpt_names=Foo;Bar, wpt_lats=1.0;2.0, ...
-    Returns a list of dicts {name, lat, lon, symbol}.
-    Returns an empty list if no valid waypoints are found.
-    """
-
-    def _as_list(v):
-        if isinstance(v, str):
-            return [x.strip() for x in v.split(';')]
-        return [str(v)]
-
-    names = _as_list(c.get('wpt_names', ''))
-    lats = _as_list(c.get('wpt_lats', 0.0))
-    lons = _as_list(c.get('wpt_lons', 0.0))
-    syms = _as_list(c.get('wpt_symbols', 'circle'))
-
-    n = max(len(names), len(lats), len(lons), len(syms))
-    waypoints = []
-    for i in range(n):
-        try:
-            name = names[i] if i < len(names) else ''
-            lat_raw = lats[i] if i < len(lats) else ''
-            lon_raw = lons[i] if i < len(lons) else ''
-            sym = syms[i] if i < len(syms) else 'circle'
-            # Skip entries with no usable coordinates
-            if not str(lat_raw).strip() or not str(lon_raw).strip():
-                continue
-            lat = float(lat_raw)
-            lon = float(lon_raw)
-            waypoints.append({
-                'name': str(name).strip(),
-                'lat': lat,
-                'lon': lon,
-                'symbol': (str(sym).strip() or 'circle'),
-            })
-        except (ValueError, IndexError):
-            continue
-    return waypoints
+get_active_folder = lfc.get_active_folder
+load_global_config = lfc.load_global_config
+parse_waypoints_from_config = lfc.parse_waypoints_from_config
 
 
 # ==========================================
 # 1. DATA ENGINE
 # ==========================================
-def load_and_tag_data():
-    """Reads satellite CSV files from the volcano subfolder."""
-    all_data = []
-    folder = get_active_folder()
+def load_and_tag_data(folder=None):
+    """Reads the VIIRS CSV files of the project folder."""
+    folder = folder or get_active_folder()
     if not folder:
         return pd.DataFrame()
-    folder_name = os.path.basename(folder)  # e.g. 'Wolf' not 'projects/Wolf'
-
-    configs = [{"pattern": f"*SNPP*{folder_name}.csv", "name": "SNPP", "id": 1},
-               {"pattern": f"*NOAA20*{folder_name}.csv", "name": "NOAA20", "id": 2},
-               {"pattern": f"*NOAA21*{folder_name}.csv", "name": "NOAA21", "id": 3}]
-
-    for c in configs:
-        search_path = os.path.join(folder, c["pattern"])
-        for f in glob.glob(search_path):
+    name = os.path.basename(folder)
+    sats = [(f"*SNPP*{name}.csv", "SNPP", 1), (f"*NOAA20*{name}.csv", "NOAA20", 2),
+            (f"*NOAA21*{name}.csv", "NOAA21", 3)]
+    frames = []
+    for pattern, sat, sid in sats:
+        for f in glob.glob(os.path.join(folder, pattern)):
             try:
-                try:
-                    df = pd.read_csv(f, encoding='utf-8')
-                except UnicodeDecodeError:
-                    df = pd.read_csv(f, encoding='latin-1')
-
+                df = lfc.read_csv_any(f)
                 for col in ['latitude', 'longitude', 'frp', 'track']:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
+                day = lfc.parse_firms_date(df['acq_date'])
+                t = df['acq_time'].astype(str).str.replace(r'\D', '', regex=True).str.zfill(4).str[-4:]
+                df['date'] = day + pd.to_timedelta(t.str[:2].astype(int), unit='h') \
+                    + pd.to_timedelta(t.str[2:].astype(int), unit='m')
+                df = df.dropna(subset=['date', 'latitude', 'longitude'])
+                df['satellite'], df['source'] = sat, sid
+                frames.append(df)
+            except Exception as e:
+                print(f"[Mapper] could not read {f}: {e}")
+    if not frames:
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True)
+    return out.drop_duplicates(subset=['latitude', 'longitude', 'date', 'satellite'])
 
-                # Robust multi-format date parser — handles:
-                # YYYY-MM-DD (ISO), DD/MM/YYYY (legacy), D/M/YY (NASA API short)
-                date_str = df['acq_date'].astype(str) + " " + df['acq_time'].astype(str).str.zfill(4)
-                parsed = pd.to_datetime(date_str, format="%Y-%m-%d %H%M", errors='coerce')
-                if parsed.isna().all():
-                    parsed = pd.to_datetime(date_str, format="%d/%m/%Y %H%M", errors='coerce')
-                if parsed.isna().all():
-                    parsed = pd.to_datetime(date_str, dayfirst=True, errors='coerce')
-                df['date'] = parsed
 
-                df['satellite'], df['source'] = c["name"], c["id"]
-                all_data.append(df)
-            except Exception:
-                continue
+def haversine_km(lat0, lon0, lats, lons):
+    p = np.pi / 180
+    a = (np.sin((lats * p - lat0 * p) / 2) ** 2
+         + np.cos(lat0 * p) * np.cos(lats * p) * np.sin((lons * p - lon0 * p) / 2) ** 2)
+    return 6371.0 * 2 * np.arcsin(np.sqrt(a))
 
-    return pd.concat(all_data) if all_data else pd.DataFrame()
+
+def run_filter(cfg, folder):
+    """Applies the FRP/track/date filters and writes the output CSVs."""
+    comb = load_and_tag_data(folder)
+    if comb.empty:
+        return comb
+    start_dt, end_dt = lfc.get_period(cfg)
+    thr = float(cfg.get('filter_frp', 0) or 0)
+    frp_mask = comb['frp'] >= thr if cfg.get('frp_filter_mode', 'gt') == 'gt' else comb['frp'] <= thr
+    filtered = comb[(comb['track'] <= float(cfg.get('filter_track', 1.0) or 1.0)) & frp_mask &
+                    (comb['date'] >= start_dt) & (comb['date'] <= end_dt)].sort_values('date').copy()
+    if filtered.empty:
+        return filtered
+    filtered['distance_km'] = haversine_km(float(cfg.get('lats_vent', 0)), float(cfg.get('longs_vent', 0)),
+                                           filtered['latitude'].values, filtered['longitude'].values)
+    filtered.to_csv(os.path.join(folder, "filter_VIIRS_combined.csv"), index=False)
+
+    daily = filtered.copy()
+    daily['date_only'] = daily['date'].dt.date
+    # keep the coordinates of the farthest anomaly of each day (not just the first row)
+    idx = daily.groupby(['date_only', 'satellite'])['distance_km'].idxmax()
+    summary = daily.loc[idx, ['date_only', 'satellite', 'distance_km', 'latitude', 'longitude', 'source']]
+    summary = summary.merge(daily.groupby(['date_only', 'satellite'])['frp'].max().reset_index(),
+                            on=['date_only', 'satellite'])
+    summary = summary[['date_only', 'satellite', 'distance_km', 'frp', 'latitude', 'longitude', 'source']]
+    summary.sort_values(['date_only', 'satellite']).to_csv(
+        os.path.join(folder, "max_distance_per_day_VIIRS.csv"), index=False)
+    return filtered
 
 
 # ==========================================
-# 2. VERTICAL COLORBAR BUILDER
+# 2. MAP HELPERS (shared with the export)
 # ==========================================
 def build_vertical_colorbar(start_dt, end_dt, n_ticks=6):
-    """
-    Returns an HTML block rendering a vertical CSS gradient colorbar
-    with date labels, positioned to sit above the scale bar.
-    Colors match the branca LinearColormap used on the map points.
-    """
-    colors = ['#2b83ba', '#abdda4', '#ffffbf', '#fdae61', '#d7191c']
-    gradient = ", ".join(colors)
-
-    total_seconds = (end_dt - start_dt).total_seconds()
-    tick_dates = [
-        start_dt + pd.Timedelta(seconds=total_seconds * i / (n_ticks - 1))
-        for i in range(n_ticks)
-    ]
-    # Labels go from bottom (oldest) to top (newest)
-    tick_labels = [d.strftime('%d/%m/%Y') for d in reversed(tick_dates)]
-
-    label_items = "".join([
-        f'<div style="flex:1;display:flex;align-items:center;'
-        f'font-size:10px;color:#333;white-space:nowrap;">{lbl}</div>'
-        for lbl in tick_labels
-    ])
-
-    html_block = f"""
-    <div style="
-        position: absolute;
-        bottom: 160px;
-        left: 10px;
-        z-index: 9999;
-        display: flex;
-        flex-direction: row;
-        align-items: stretch;
-        height: 160px;
-        pointer-events: none;
-        background-color: white;
-        padding: 5px 7px;
-        border-radius: 5px;
-    ">
-        <!-- Gradient bar -->
-        <div style="
-            width: 14px;
-            height: 100%;
-            background: linear-gradient(to top, {gradient});
-            border: 1px solid #aaa;
-            border-radius: 3px;
-            margin-right: 5px;
-            flex-shrink: 0;
-        "></div>
-        <!-- Date tick labels -->
-        <div style="
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            height: 100%;
-        ">
-            {label_items}
-        </div>
-    </div>
-    """
-    return html_block
+    """Vertical date colour bar (newest on top) matching the anomaly colours."""
+    gradient = ", ".join(lfc.DATE_RAMP)
+    total = (end_dt - start_dt).total_seconds()
+    ticks = [start_dt + pd.Timedelta(seconds=total * i / (n_ticks - 1)) for i in range(n_ticks)]
+    labels = "".join(
+        f'<div style="font-size:11px;color:#333;white-space:nowrap;line-height:1;">{d.strftime("%d/%m/%Y")}</div>'
+        for d in reversed(ticks))
+    return f"""
+    <div style="position:absolute;bottom:70px;left:10px;z-index:9999;display:flex;
+                height:170px;pointer-events:none;background:rgba(255,255,255,0.9);
+                padding:6px 8px;border-radius:5px;box-shadow:0 1px 4px rgba(0,0,0,0.2);">
+        <div style="width:14px;height:100%;background:linear-gradient(to top, {gradient});
+                    border:1px solid #aaa;border-radius:3px;margin-right:6px;"></div>
+        <div style="display:flex;flex-direction:column;justify-content:space-between;height:100%;">{labels}</div>
+    </div>"""
 
 
-# ==========================================
-# 2b. LOCK-ZOOM CONTROL (injected into folium)
-# ==========================================
 def build_lock_zoom_script():
-    """
-    Returns a <script> block that adds a Leaflet control button at the
-    bottom-right of the folium map. The button toggles scrollWheelZoom,
-    doubleClickZoom, touchZoom and boxZoom on the leaflet map instance.
-    Works inside the iframe because it manipulates the leaflet map directly,
-    finding it via the global `map_*` variable folium auto-creates.
-    """
+    """Adds a 'lock / unlock scroll zoom' button to the folium map (top-left, under +/-)."""
     return """
     <script>
     (function() {
-        function attachLockButton() {
-            // Find folium's auto-generated map variable (e.g. map_abc123)
-            var mapKey = Object.keys(window).find(function(k) {
-                return k.startsWith('map_') && window[k] && window[k]._container;
-            });
-            if (!mapKey) { setTimeout(attachLockButton, 150); return; }
-            var leafletMap = window[mapKey];
-
-            var LockControl = L.Control.extend({
-                options: { position: 'bottomright' },
+        function attach() {
+            var key = Object.keys(window).find(function(k) {
+                return k.startsWith('map_') && window[k] && window[k]._container; });
+            if (!key) { setTimeout(attach, 150); return; }
+            var m = window[key];
+            var Ctl = L.Control.extend({
+                options: { position: 'topleft' },
                 onAdd: function(map) {
-                    var btn = L.DomUtil.create('button', 'leaflet-bar lock-zoom-btn');
-                    btn.innerHTML = '🔓 Unlock zoom';
-                    btn.style.cssText = 'padding:6px 10px;background:#c0392b;color:white;' +
-                        'border:none;border-radius:4px;cursor:pointer;' +
-                        'font-weight:bold;font-size:12px;' +
-                        'box-shadow:0 1px 5px rgba(0,0,0,0.3);' +
-                        'margin-bottom:400px;';
+                    var b = L.DomUtil.create('button', 'leaflet-bar');
+                    b.style.cssText = 'padding:4px 8px;background:white;border:1px solid #bbb;' +
+                                      'border-radius:4px;cursor:pointer;font-size:12px;';
                     var locked = true;
-                    // Apply locked state immediately on map load
-                    map.scrollWheelZoom.disable();
-                    map.doubleClickZoom.disable();
-                    map.touchZoom.disable();
-                    map.boxZoom.disable();
-
-                    L.DomEvent.disableClickPropagation(btn);
-                    L.DomEvent.on(btn, 'click', function() {
-                        locked = !locked;
-                     if (locked) {
-                        map.scrollWheelZoom.disable();
-                        map.doubleClickZoom.disable();
-                        map.touchZoom.disable();
-                        map.boxZoom.disable();
-                        btn.innerHTML = '🔓 Unlock zoom';
-                        btn.style.background = '#c0392b';
-                     } else {
-                        map.scrollWheelZoom.enable();
-                        map.doubleClickZoom.enable();
-                        map.touchZoom.enable();
-                        map.boxZoom.enable();
-                        btn.innerHTML = '🔒 Lock zoom';
-                        btn.style.background = '#7f8c8d';
-                     }
-                    });
-                    return btn;
+                    function apply() {
+                        ['scrollWheelZoom','doubleClickZoom','touchZoom','boxZoom'].forEach(function(h){
+                            locked ? map[h].disable() : map[h].enable(); });
+                        b.innerHTML = locked ? '&#128274; Scroll zoom off' : '&#128275; Scroll zoom on';
+                    }
+                    apply();
+                    L.DomEvent.disableClickPropagation(b);
+                    L.DomEvent.on(b, 'click', function() { locked = !locked; apply(); });
+                    return b;
                 }
-
             });
-            leafletMap.addControl(new LockControl());
+            m.addControl(new Ctl());
         }
-        if (document.readyState === 'complete') {
-            attachLockButton();
-        } else {
-            window.addEventListener('load', attachLockButton);
-        }
+        if (document.readyState === 'complete') attach(); else window.addEventListener('load', attach);
     })();
-    </script>
-    """
+    </script>"""
 
 
-# ==========================================
-# 2c. RADIUS LAYER -> PLOTLY BRIDGE
-# ==========================================
-def build_radius_bridge_script(layer_name="Reference Radius"):
-    """
-    Returns a <script> block injected into the folium iframe that listens
-    to LayerControl 'overlayadd' / 'overlayremove' events for the
-    Reference Radius layer and posts a message to the parent window so
-    the Plotly chart can show/hide its reference-radius trace in sync.
-    """
+def build_basemap_fallback_script(map_var, topo_var, esri_var):
+    """If OpenTopoMap tiles fail (and none loaded), switch to Esri imagery and say so."""
     return f"""
     <script>
     (function() {{
-        var TARGET_LAYER = "{layer_name}";
-
-        function attachBridge() {{
-            var mapKey = Object.keys(window).find(function(k) {{
-                return k.startsWith('map_') && window[k] && window[k]._container;
-            }});
-            if (!mapKey) {{ setTimeout(attachBridge, 150); return; }}
-            var leafletMap = window[mapKey];
-
-            function postState(visible) {{
-                try {{
-                    window.parent.postMessage({{
-                        source: 'lavaflow-mapper',
-                        type:   'ref-radius-visibility',
-                        visible: visible
-                    }}, '*');
-                }} catch (e) {{}}
+        function attach() {{
+            var m = window['{map_var}'], topo = window['{topo_var}'], esri = window['{esri_var}'];
+            if (!m || !topo || !esri) {{ setTimeout(attach, 150); return; }}
+            var ok = 0, err = 0, switched = false;
+            function fallback() {{
+                if (switched || ok > 0) return;
+                switched = true;
+                m.removeLayer(topo);
+                esri.addTo(m);
+                var note = L.control({{position: 'bottomright'}});
+                note.onAdd = function() {{
+                    var d = L.DomUtil.create('div');
+                    d.style.cssText = 'background:rgba(255,255,255,0.9);padding:3px 8px;border-radius:4px;' +
+                                      'font-size:11px;color:#555;margin-bottom:18px;';
+                    d.innerHTML = 'OpenTopoMap unavailable here &rarr; Esri imagery shown';
+                    return d;
+                }};
+                note.addTo(m);
             }}
-
-            // Listen for overlay toggle events from the LayerControl
-            leafletMap.on('overlayadd', function(e) {{
-                if (e.name === TARGET_LAYER) postState(true);
-            }});
-            leafletMap.on('overlayremove', function(e) {{
-                if (e.name === TARGET_LAYER) postState(false);
-            }});
-
-            // After init, broadcast the current state so the plot is in sync on load.
-            // Walks the map's layer list to detect whether the radius layer is on.
-            setTimeout(function() {{
-                var found = false, currentlyOn = false;
-                leafletMap.eachLayer(function(layer) {{
-                    // Folium tags FeatureGroups with options.name when registered to LayerControl
-                    if (layer && layer.options && layer.options.name === TARGET_LAYER) {{
-                        found = true; currentlyOn = true;
-                    }}
-                }});
-                // Whether or not it's currently on the map, broadcast it
-                postState(currentlyOn);
-            }}, 300);
+            function loadedTiles() {{
+                var n = 0;
+                for (var k in (topo._tiles || {{}})) {{
+                    var el = topo._tiles[k].el;
+                    if (el && el.complete && el.naturalWidth > 0) n++;
+                }}
+                return n;
+            }}
+            topo.on('tileload', function() {{ ok++; }});
+            topo.on('tileerror', function() {{ err++; if (err >= 3 && loadedTiles() === 0) fallback(); }});
+            // check repeatedly: errors may have happened before this script started listening
+            var tries = 0;
+            (function check() {{
+                if (switched || !m.hasLayer(topo)) return;
+                ok = Math.max(ok, loadedTiles());
+                if (ok > 0) return;
+                if (++tries >= 12) {{ fallback(); return; }}      // ~6 s without a single tile
+                setTimeout(check, 500);
+            }})();
         }}
-
-        if (document.readyState === 'complete') {{
-            attachBridge();
-        }} else {{
-            window.addEventListener('load', attachBridge);
-        }}
+        attach();
     }})();
-    </script>
+    </script>"""
+
+
+def build_refit_script(bounds):
+    """Re-fits the map once the (i)frame has its final size. Inside a lazily laid-out
+    iframe the initial fitBounds runs on a 0-px map and ends at the wrong zoom."""
+    return f"""
+    <script>
+    (function() {{
+        var B = {bounds};
+        function refit() {{
+            var key = Object.keys(window).find(function(k) {{
+                return k.startsWith('map_') && window[k] && window[k]._container; }});
+            if (!key) {{ setTimeout(refit, 150); return; }}
+            var m = window[key];
+            if (!m._container.clientHeight) {{ setTimeout(refit, 200); return; }}
+            m.invalidateSize();
+            m.fitBounds(B, {{padding: [20, 20]}});
+        }}
+        if (document.readyState === 'complete') refit(); else window.addEventListener('load', refit);
+        var t; window.addEventListener('resize', function() {{
+            clearTimeout(t); t = setTimeout(function() {{
+                var key = Object.keys(window).find(function(k) {{ return k.startsWith('map_') && window[k] && window[k]._container; }});
+                if (key) window[key].invalidateSize(); }}, 200); }});
+    }})();
+    </script>"""
+
+
+MAP_CSS = """
+<style>
+  .leaflet-control-scale { margin-bottom: 20px !important; }
+  .leaflet-tooltip.wpt-label { background: rgba(255,255,255,0.95); border: 1px solid #555;
+      border-radius: 4px; padding: 1px 6px; font-size: 11px; font-weight: bold; color: #2c3e50; }
+</style>"""
+
+
+def add_waypoint_marker(feature_group, lat, lon, name, symbol, permanent_label=False):
+    tooltip = folium.Tooltip(name or "Waypoint", permanent=bool(permanent_label and name),
+                             direction='right', offset=(8, 0), class_name='wpt-label')
+    kw = dict(color='black', fill=True, fill_color='black', fill_opacity=1.0, tooltip=tooltip)
+    if symbol == "triangle":
+        RegularPolygonMarker([lat, lon], number_of_sides=3, radius=9, rotation=30, **kw).add_to(feature_group)
+    elif symbol == "square":
+        RegularPolygonMarker([lat, lon], number_of_sides=4, radius=7, rotation=45, **kw).add_to(feature_group)
+    else:
+        folium.CircleMarker([lat, lon], radius=6, **kw).add_to(feature_group)
+
+
+def build_folium_map(folder, cfg, df, labels=False, fit='all', default_basemap='esri'):
     """
-
-
-# ==========================================
-# 2d. WAYPOINT MARKER HELPER
-# ==========================================
-def add_waypoint_marker(feature_group, lat, lon, name, symbol):
-    """Adds a single waypoint to a folium FeatureGroup with the requested symbol."""
-    if symbol == "circle":
-        folium.CircleMarker(
-            [lat, lon], radius=7, color='black', fill=True, fill_opacity=1.0,
-            tooltip=name or "Waypoint"
-        ).add_to(feature_group)
-    elif symbol == "triangle":
-        RegularPolygonMarker(
-            [lat, lon], number_of_sides=3, radius=9, rotation=30,
-            color='black', fill=True, fill_opacity=1.0,
-            tooltip=name or "Waypoint"
-        ).add_to(feature_group)
-    else:  # square or anything else falls back to square
-        RegularPolygonMarker(
-            [lat, lon], number_of_sides=4, radius=7, rotation=45,
-            color='black', fill=True, fill_opacity=1.0,
-            tooltip=name or "Waypoint"
-        ).add_to(feature_group)
-
-
-# ==========================================
-# 3. DASHBOARD GENERATOR
-# ==========================================
-def get_layout():
-    """Returns the finalized layout and saves necessary CSV files to the volcano folder."""
-    cfg = load_global_config()
-    folder = get_active_folder()
-    volcano = cfg.get('volcano', 'Volcano')
-    LATS_vent = cfg.get('lats_vent', 0.0)
-    LONGS_vent = cfg.get('longs_vent', 0.0)
-
-    comb = load_and_tag_data()
-    if comb.empty:
-        return html.Div(f"Error: No data files found in folder '{folder}'.")
-
-    start_dt = pd.to_datetime(cfg.get('start_day_str'), dayfirst=True)
-    end_dt = pd.to_datetime(cfg.get('end_day_str'), dayfirst=True)
-
-    # Apply FRP filter direction based on frp_filter_mode: 'gt' = >= threshold, 'lt' = <= threshold
-    frp_threshold = cfg.get('filter_frp', 0.0)
-    frp_mode = cfg.get('frp_filter_mode', 'gt')
-    frp_mask = comb['frp'] >= frp_threshold if frp_mode == 'gt' else comb['frp'] <= frp_threshold
-
-    filtered = comb[(comb['track'] <= cfg.get('filter_track', 1.0)) &
-                    frp_mask &
-                    (comb['date'] >= start_dt) & (comb['date'] <= end_dt)].sort_values('date').copy()
-
-    if filtered.empty:
-        return html.Div("No anomalies found in this range.")
-
-    R_earth = 6371.0
-    p = np.pi / 180
-    lat1, lon1 = LATS_vent * p, LONGS_vent * p
-    lat2, lon2 = filtered['latitude'].values * p, filtered['longitude'].values * p
-    a = np.sin((lat2 - lat1) / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin((lon2 - lon1) / 2) ** 2
-    filtered['distance_km'] = R_earth * 2 * np.arcsin(np.sqrt(a))
-
-    # --- SAVE RESULTS TO VOLCANO FOLDER ---
-    if folder:
-        filtered.to_csv(os.path.join(folder, "filter_VIIRS_combined.csv"), index=False)
-        daily_max = filtered.copy()
-        daily_max['date_only'] = daily_max['date'].dt.date
-        summary = daily_max.groupby(['date_only', 'satellite']).agg({
-            'distance_km': 'max', 'frp': 'max', 'latitude': 'first',
-            'longitude': 'first', 'source': 'first'
-        }).reset_index()
-        summary.to_csv(os.path.join(folder, "max_distance_per_day_VIIRS.csv"), index=False)
-
-    # --- FOLIUM MAP ---
-    m = folium.Map(location=[LATS_vent, LONGS_vent], zoom_start=13, control_scale=True, tiles=None)
-
-    custom_css = """
-    <style>
-        .leaflet-control-scale {
-            position: absolute !important;
-            bottom: 100px !important;
-            left: 10px !important;
-            z-index: 9999 !important;
-            visibility: visible !important;
-        }
-        .legend {
-            display: flex !important;
-            flex-direction: column !important;
-            align-items: flex-start !important;
-        }
-        .legend .caption {
-            font-size: 13px !important;
-            font-weight: bold !important;
-            color: black !important;
-            margin-bottom: 5px !important;
-            order: -1 !important;
-        }
-    </style>
+    Folium map of the filtered anomalies. Returns (html, warning).
+    The map is fitted to anomalies + vent (+ radius / waypoints only when
+    those layers are enabled and valid), so it never drifts to (0, 0).
     """
-    m.get_root().header.add_child(folium.Element(custom_css))
+    lat_v, lon_v = float(cfg.get('lats_vent', 0)), float(cfg.get('longs_vent', 0))
+    start_dt, end_dt = lfc.get_period(cfg)
+    if pd.isna(start_dt):
+        start_dt = df['date'].min()
+    if pd.isna(end_dt):
+        end_dt = df['date'].max()
 
-    folium.TileLayer('Esri World Imagery', name='Esri World Imagery').add_to(m)
-    folium.TileLayer('OpenStreetMap', name='OpenStreetMap').add_to(m)
-    folium.TileLayer('OpenTopoMap', name='OpenTopoMap').add_to(m)
+    m = folium.Map(location=[lat_v, lon_v], zoom_start=13, control_scale=True, tiles=None)
+    m.get_root().header.add_child(folium.Element(MAP_CSS))
+    # Esri imagery is the visible default: OSM/OpenTopoMap refuse tile requests that come from a
+    # local HTML file (no HTTP referer), which left the exported map blank.
+    # default_basemap='topo' shows OpenTopoMap first; if its tiles fail to load (some tile servers
+    # refuse requests coming from a local HTML file) the map switches to Esri automatically.
+    topo_first = default_basemap == 'topo'
+    tl_esri = folium.TileLayer('Esri World Imagery', name='Esri World Imagery', show=not topo_first)
+    tl_topo = folium.TileLayer('OpenTopoMap', name='OpenTopoMap', show=topo_first)
+    tl_osm = folium.TileLayer('OpenStreetMap', name='OpenStreetMap', show=False)
+    for tl in (tl_topo, tl_esri, tl_osm) if topo_first else (tl_esri, tl_topo, tl_osm):
+        tl.add_to(m)
 
-    min_ts, max_ts = start_dt.timestamp(), end_dt.timestamp()
-    # Keep the branca colormap for circle coloring but hide its default legend
-    colormap = bcm.LinearColormap(
-        colors=['#2b83ba', '#abdda4', '#ffffbf', '#fdae61', '#d7191c'],
-        vmin=min_ts, vmax=max_ts
-    )
+    cmap = bcm.LinearColormap(colors=lfc.DATE_RAMP, vmin=start_dt.timestamp(),
+                              vmax=max(end_dt.timestamp(), start_dt.timestamp() + 1))
+    m.get_root().html.add_child(folium.Element(build_vertical_colorbar(start_dt, end_dt)))
 
-    s_label, e_label = start_dt.strftime("%d/%m/%Y"), end_dt.strftime("%d/%m/%Y")
+    fg = folium.FeatureGroup(name="Thermal anomalies")
+    for r in df.itertuples():
+        folium.Circle(location=[r.latitude, r.longitude], radius=187.5,
+                      color=cmap(r.date.timestamp()), weight=1, fill=True, fill_opacity=0.7,
+                      popup=f"{r.date.strftime('%Y-%m-%d %H:%M')} UTC<br>{r.satellite}<br>"
+                            f"FRP: {r.frp} MW<br>Distance: {r.distance_km:.2f} km").add_to(fg)
+    fg.add_to(m)
 
-    # Inject the vertical colorbar as a custom HTML element instead of branca's default
-    colorbar_html = build_vertical_colorbar(start_dt, end_dt, n_ticks=6)
-    m.get_root().html.add_child(folium.Element(colorbar_html))
-
-    fg_anomalies = folium.FeatureGroup(name="Thermal Anomalies")
-    for _, row in filtered.iterrows():
-        folium.Circle(
-            location=[row['latitude'], row['longitude']], radius=192.5,
-            color=colormap(row['date'].timestamp()), fill=True, fill_opacity=0.7,
-            popup=f"Date: {row['date'].strftime('%Y-%m-%d %H:%M')}<br>FRP: {row['frp']} MW"
-        ).add_to(fg_anomalies)
-    fg_anomalies.add_to(m)
-
-    # --- SHAPEFILE: errors are now shown to the user in the layout ---
-    shapefile_warning = None
+    warning = None
     if cfg.get('include_shapefile') and cfg.get('shapefile_path'):
-        shp_name = str(cfg.get('shapefile_path'))
-        if not shp_name.lower().endswith(".shp"):
-            shp_name += ".shp"
-        actual_path = os.path.join(folder, shp_name) if folder else shp_name
-
-        if not os.path.exists(actual_path):
-            shapefile_warning = f"⚠️ Shapefile not found: {actual_path}"
+        shp = lfc.shapefile_path(cfg, folder)
+        if not shp:
+            warning = f"Shapefile not found: {cfg.get('shapefile_path')} (expected inside {folder})"
         else:
             try:
-                import geopandas as gpd
-                gdf = gpd.read_file(actual_path).to_crs(epsg=4326)
-                folium.GeoJson(
-                    gdf, name="Reference Shapefile",
-                    style_function=lambda x: {'color': 'black', 'weight': 2, 'fill': False}
-                ).add_to(m)
+                gj = lfc.shapefile_geojson(shp)
+                folium.GeoJson(gj, name="Shapefile",
+                               style_function=lambda x: {'color': 'black', 'weight': 2, 'fill': False}).add_to(m)
             except Exception as e:
-                shapefile_warning = f"⚠️ Error loading shapefile '{shp_name}': {str(e)}"
+                warning = f"Error loading shapefile: {e}"
 
-    # Track whether the reference radius is enabled at all — needed below to
-    # decide whether the plot should even contain the radius trace.
-    has_ref_radius = bool(cfg.get('include_reference_radius'))
-    ref_radius_km = cfg.get('ref_radius_m', 5000) / 1000.0
+    lats = list(df['latitude'].values) + [lat_v]
+    lons = list(df['longitude'].values) + [lon_v]
+    anom_lats, anom_lons = list(lats), list(lons)
 
-    if has_ref_radius:
-        fg_rad = folium.FeatureGroup(name='Reference Radius')
-        folium.Circle(
-            location=[LATS_vent, LONGS_vent], radius=cfg.get('ref_radius_m', 5000),
-            color='black', weight=1, fill=False, dash_array='5,5'
-        ).add_to(fg_rad)
-        fg_rad.add_to(m)
+    if cfg.get('include_reference_radius'):
+        rad = float(cfg.get('ref_radius_m', 5000))
+        fg_r = folium.FeatureGroup(name='Reference radius')
+        folium.Circle(location=[lat_v, lon_v], radius=rad, color='black', weight=1.5,
+                      fill=False, dash_array='6,6').add_to(fg_r)
+        fg_r.add_to(m)
+        dlat = rad / 111000.0
+        dlon = rad / (111000.0 * max(np.cos(np.radians(lat_v)), 1e-6))
+        lats += [lat_v - dlat, lat_v + dlat]
+        lons += [lon_v - dlon, lon_v + dlon]
 
-    # --- MULTI-WAYPOINT PLOTTING ---
-    # Read all waypoints from config (semicolon-separated, with single-waypoint fallback)
-    waypoints = parse_waypoints_from_config(cfg) if cfg.get('include_reference_waypoint') else []
-    if waypoints:
-        fg_wpts = folium.FeatureGroup(name="Reference Waypoints")
-        for wpt in waypoints:
-            add_waypoint_marker(
-                fg_wpts,
-                lat=wpt['lat'], lon=wpt['lon'],
-                name=wpt['name'], symbol=wpt['symbol']
-            )
-        fg_wpts.add_to(m)
+    wpts = parse_waypoints_from_config(cfg) if cfg.get('include_reference_waypoint') else []
+    if wpts:
+        fg_w = folium.FeatureGroup(name="Waypoints")
+        for w in wpts:
+            add_waypoint_marker(fg_w, w['lat'], w['lon'], w['name'], w['symbol'], permanent_label=labels)
+            lats.append(w['lat'])
+            lons.append(w['lon'])
+        fg_w.add_to(m)
 
-    folium.Marker(
-        [LATS_vent, LONGS_vent],
-        icon=folium.DivIcon(
-            html='<div style="width:0;height:0;border-left:10px solid transparent;'
-                 'border-right:10px solid transparent;border-bottom:20px solid black;'
-                 'transform:translate(-50%,-50%);"></div>'
-        ),
-        tooltip="Vent"
-    ).add_to(m)
+    folium.Marker([lat_v, lon_v], tooltip="Vent", icon=folium.DivIcon(
+        html='<div style="width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;'
+             'border-bottom:18px solid black;transform:translate(-50%,-50%);"></div>')).add_to(m)
+    folium.LayerControl(collapsed=True).add_to(m)
 
-    folium.LayerControl(collapsed=False).add_to(m)
-
-    # --- AUTO-FIT MAP BOUNDS TO DATA EXTENT ---
-    # Compute bounding box from anomalies and vent; include reference radius if enabled
-    lats = list(filtered['latitude'].values) + [LATS_vent]
-    lons = list(filtered['longitude'].values) + [LONGS_vent]
-
-    # If the reference radius is enabled, expand bounds so the full circle is visible
-    if has_ref_radius:
-        radius_m = cfg.get('ref_radius_m', 5000)
-        # Rough degree conversion: 1 deg lat ≈ 111 km; lon adjusted by latitude
-        dlat = radius_m / 111000.0
-        dlon = radius_m / (111000.0 * max(np.cos(np.radians(LATS_vent)), 1e-6))
-        lats += [LATS_vent - dlat, LATS_vent + dlat]
-        lons += [LONGS_vent - dlon, LONGS_vent + dlon]
-
-    # Include ALL reference waypoints if enabled
-    for wpt in waypoints:
-        lats.append(wpt['lat'])
-        lons.append(wpt['lon'])
-
-    south, north = min(lats), max(lats)
-    west, east = min(lons), max(lons)
-
-    # Guard against degenerate (single-point) bounds — add a small buffer
-    if south == north:
-        south -= 0.005
-        north += 0.005
-    if west == east:
-        west -= 0.005
-        east += 0.005
-
-    m.fit_bounds([[south, west], [north, east]], padding=(30, 30))
-
-    # Inject lock-zoom button (must come AFTER LayerControl so leaflet map is fully built)
+    if fit == 'anomalies':            # export: zoom to the anomalies (and the vent) only
+        lats, lons = anom_lats, anom_lons
+    s, n, w_, e = min(lats), max(lats), min(lons), max(lons)
+    if n - s < 0.01:
+        s, n = s - 0.005, n + 0.005
+    if e - w_ < 0.01:
+        w_, e = w_ - 0.005, e + 0.005
+    bounds = [[s, w_], [n, e]]
+    m.fit_bounds(bounds, padding=(20, 20))
     m.get_root().html.add_child(folium.Element(build_lock_zoom_script()))
+    m.get_root().html.add_child(folium.Element(build_refit_script(bounds)))
+    if topo_first:
+        m.get_root().html.add_child(folium.Element(
+            build_basemap_fallback_script(m.get_name(), tl_topo.get_name(), tl_esri.get_name())))
+    return m.get_root().render(), warning
 
-    map_html = m._repr_html_()
 
-    # --- PLOTLY TIME SERIES ---
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08)
-    sat_colors = {'SNPP': 'orange', 'NOAA20': 'purple', 'NOAA21': 'red'}
+# ==========================================
+# 3. TIME SERIES (shared with the export)
+# ==========================================
+def compute_ts_stats(df, x0=None, x1=None):
+    """mean / P95 / max of FRP and distance inside [x0, x1]."""
+    d = df
+    if x0 is not None and not pd.isna(x0):
+        d = d[d['date'] >= pd.Timestamp(x0)]
+    if x1 is not None and not pd.isna(x1):
+        d = d[d['date'] <= pd.Timestamp(x1)]
+    return {'n': int(len(d)),
+            'frp': lfc.robust_stats(d['frp']) if len(d) else None,
+            'dist': lfc.robust_stats(d['distance_km']) if len(d) else None,
+            'x0': x0, 'x1': x1}
 
-    for sat, color in sat_colors.items():
-        d = filtered[filtered['satellite'] == sat]
-        if not d.empty:
-            fig.add_trace(go.Scatter(
-                x=d['date'], y=d['frp'], mode='markers', name=sat,
-                marker=dict(color=color, size=8, line=dict(width=1, color='black')),
-                hovertemplate="Date: %{x|%d/%m/%Y}<br>FRP: %{y} MW<extra></extra>"
-            ), row=1, col=1)
-            for _, row in d.iterrows():
-                fig.add_trace(go.Scatter(
-                    x=[row['date'], row['date']], y=[0, row['distance_km']],
-                    mode='lines', line=dict(color=color, width=1.2),
-                    showlegend=False, hoverinfo='skip'
-                ), row=2, col=1)
-            fig.add_trace(go.Scatter(
-                x=d['date'], y=d['distance_km'], mode='markers',
-                marker=dict(color=color, size=6), showlegend=False,
-                hovertemplate="Date: %{x|%d/%m/%Y}<br>Max. Distance: %{y:.2f} km<extra></extra>"
-            ), row=2, col=1)
 
-    # ---- Reference radius line on the distance subplot ----
-    # Independent toggle: a button in the top-right of the figure shows/hides
-    # the radius line. This is a self-contained Plotly control that does not
-    # depend on the map's LayerControl. The line also appears as a regular
-    # legend entry so it can be toggled from there as well.
-    REF_RADIUS_TRACE_NAME = "__ref_radius_line__"
-    if has_ref_radius:
+def build_ts_stats_panel(st):
+    def fmt(x0):
+        return pd.Timestamp(x0).strftime('%d/%m/%Y %H:%M') if x0 is not None and not pd.isna(x0) else '–'
+
+    def tiles(title, s, unit, dec):
+        if not s:
+            return html.Div([html.Div(title, className='lf-stat-group-title'),
+                             html.Div("no data in view", className='lf-muted')], className='lf-col')
+        return html.Div([
+            html.Div(title, className='lf-stat-group-title'),
+            html.Div([
+                html.Div([html.Div("Mean", className='k'), html.Div(f"{s['mean']:.{dec}f} {unit}", className='v')],
+                         className='lf-stat'),
+                html.Div([html.Div("P95", className='k'), html.Div(f"{s['p95']:.{dec}f} {unit}", className='v')],
+                         className='lf-stat accent'),
+                html.Div([html.Div("Max", className='k'), html.Div(f"{s['max']:.{dec}f} {unit}", className='v')],
+                         className='lf-stat alert'),
+            ], className='lf-stats', style={'margin': '0'}),
+        ], className='lf-col')
+
+    return html.Div([
+        html.Div([
+            html.Span("Statistics for the visible window: ", style={'fontWeight': '600'}),
+            html.Span(f"{fmt(st['x0'])} → {fmt(st['x1'])} · {st['n']} anomalies", className='lf-muted'),
+            html.Span("  (zoom or pan the chart to update; double-click to reset)", className='lf-muted'),
+        ]),
+        html.Div([tiles("FRP", st['frp'], "MW", 1), tiles("Distance to vent", st['dist'], "km", 2)],
+                 className='lf-row', style={'marginTop': '6px'}),
+    ])
+
+
+def build_timeseries_figure(df, cfg, title=True):
+    """FRP (top) and distance-to-vent stems (bottom), one colour per satellite."""
+    start_dt, end_dt = lfc.get_period(cfg)
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.07)
+
+    for sat, color in lfc.SAT_COLORS.items():
+        d = df[df['satellite'] == sat]
+        if d.empty:
+            continue
+        fig.add_trace(go.Scattergl(
+            x=d['date'], y=d['frp'], mode='markers', name=sat, legendgroup=sat,
+            marker=dict(color=color, size=7, line=dict(width=0.6, color='black')),
+            hovertemplate="%{x|%d/%m/%Y %H:%M}<br>FRP: %{y:.1f} MW<extra>" + sat + "</extra>"), row=1, col=1)
+        sx, sy = lfc.stem_xy(d['date'], d['distance_km'])
+        fig.add_trace(go.Scatter(x=sx, y=sy, mode='lines', line=dict(color=color, width=1),
+                                 legendgroup=sat, showlegend=False, hoverinfo='skip'), row=2, col=1)
+        fig.add_trace(go.Scattergl(
+            x=d['date'], y=d['distance_km'], mode='markers', legendgroup=sat, showlegend=False,
+            marker=dict(color=color, size=5),
+            hovertemplate="%{x|%d/%m/%Y %H:%M}<br>Distance: %{y:.2f} km<extra>" + sat + "</extra>"), row=2, col=1)
+
+    menus = []
+    if cfg.get('include_reference_radius') and not pd.isna(start_dt):
+        rk = float(cfg.get('ref_radius_m', 5000)) / 1000.0
         fig.add_trace(go.Scatter(
-            x=[start_dt, end_dt],
-            y=[ref_radius_km, ref_radius_km],
-            mode='lines',
-            line=dict(color='black', width=1.5, dash='dash'),
-            name=f"Ref. radius ({ref_radius_km:.2f} km)",
-            legendgroup='ref_radius',
-            showlegend=True,
-            hovertemplate=f"Ref. radius: {ref_radius_km:.2f} km<extra></extra>",
-            meta=REF_RADIUS_TRACE_NAME,
-            visible=True,
-        ), row=2, col=1)
+            x=[start_dt, end_dt], y=[rk, rk], mode='lines', name=f"Ref. radius ({rk:.2f} km)",
+            line=dict(color='black', width=1.5, dash='dash'), meta='ref_radius',
+            hovertemplate=f"Ref. radius: {rk:.2f} km<extra></extra>"), row=2, col=1)
+        idx = len(fig.data) - 1
+        menus = [dict(type='buttons', direction='right', x=1.0, xanchor='right', y=1.02, yanchor='bottom',
+                      showactive=True, active=0, pad=dict(r=2, t=2, b=2, l=2), font=dict(size=11),
+                      bgcolor='white', bordercolor='#cfd4da',
+                      buttons=[dict(label='Radius on', method='restyle', args=[{'visible': True}, [idx]]),
+                               dict(label='Radius off', method='restyle', args=[{'visible': False}, [idx]])])]
 
-        # Locate the index of the radius trace so the button targets it precisely.
-        # All other traces stay untouched ('args' uses trace indices).
-        radius_trace_idx = len(fig.data) - 1
-        n_traces = len(fig.data)
-
-        # 'restyle' args: visibility array spanning all traces. We keep every
-        # other trace's visibility as-is by passing None, and flip only the
-        # radius trace. Plotly accepts a list aligned with trace indices.
-        show_vis = [None] * n_traces
-        hide_vis = [None] * n_traces
-        show_vis[radius_trace_idx] = True
-        hide_vis[radius_trace_idx] = 'legendonly'   # keeps the legend entry visible
-
-        radius_buttons = dict(
-            type='buttons',
-            direction='right',
-            x=1.0, xanchor='right',
-            y=1.08, yanchor='bottom',
-            showactive=True,
-            buttons=[
-                dict(
-                    label='⚫ Show Ref. Radius',
-                    method='restyle',
-                    args=[{'visible': [True if i == radius_trace_idx else None
-                                       for i in range(n_traces)]}],
-                ),
-                dict(
-                    label='⚪ Hide Ref. Radius',
-                    method='restyle',
-                    args=[{'visible': ['legendonly' if i == radius_trace_idx else None
-                                       for i in range(n_traces)]}],
-                ),
-            ],
-            pad=dict(r=4, t=4, b=4, l=4),
-            bgcolor='#ecf0f1',
-            bordercolor='#bdc3c7',
-            font=dict(size=11),
-        )
-
+    s_lbl = start_dt.strftime('%d/%m/%Y') if not pd.isna(start_dt) else ''
+    e_lbl = end_dt.strftime('%d/%m/%Y') if not pd.isna(end_dt) else ''
     fig.update_layout(
-        title=dict(
-            text=f"FIRMS - Thermal anomalies<br>{volcano} volcano: {s_label} - {e_label}",
-            x=0.5, xanchor='center', font=dict(size=18, color='black')
-        ),
-        height=750, template="plotly_white", margin=dict(t=140, b=50),
-        legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="left", x=0),
-        updatemenus=[radius_buttons] if has_ref_radius else [],
+        title=dict(text=f"FIRMS thermal anomalies — {cfg.get('volcano', '')}<br><sup>{s_lbl} – {e_lbl}</sup>",
+                   x=0.5, font=dict(size=17)) if title else None,
+        template="plotly_white", autosize=True, margin=dict(t=80 if title else 40, b=40, l=65, r=20),
+        legend=dict(orientation="h", yanchor="top", y=-0.07, xanchor="left", x=0),
+        updatemenus=menus, uirevision='mapper-ts',
     )
+    if not pd.isna(start_dt) and not pd.isna(end_dt):
+        fig.update_xaxes(range=[start_dt, end_dt])
+    fig.update_yaxes(title_text="FRP (MW)", row=1, col=1, rangemode='tozero')
+    fig.update_yaxes(title_text="Distance to vent (km)", row=2, col=1, rangemode='tozero')
+    return fig
 
-    # Force x-axis to span the full configured period, regardless of data extent
-    fig.update_xaxes(range=[start_dt, end_dt], row=1, col=1)
-    fig.update_xaxes(range=[start_dt, end_dt], row=2, col=1)
 
-    fig.update_yaxes(title_text="FRP (MW)", row=1, col=1)
-    fig.update_yaxes(title_text="Max. Lava Flow Distance (km)", row=2, col=1, rangemode='tozero')
+# ==========================================
+# 4. DASH LAYOUT
+# ==========================================
+def get_layout():
+    cfg = load_global_config()
+    folder = get_active_folder()
+    if not folder:
+        return html.Div("No active project found. Please configure a volcano first.", className='lf-msg lf-msg-warn')
+    volcano = cfg.get('volcano', 'Volcano')
 
-    # --- SUMMARY STATS PANEL ---
-    # Read from filter_VIIRS_combined.csv to get global stats across all satellites
-    summary_panel = None
-    csv_path = os.path.join(folder, "filter_VIIRS_combined.csv") if folder else "filter_VIIRS_combined.csv"
-    if os.path.exists(csv_path):
-        df_comb = pd.read_csv(csv_path)
-        if not df_comb.empty:
-            frp_mean = df_comb['frp'].mean()
-            frp_max = df_comb['frp'].max()
-            dist_mean = df_comb['distance_km'].mean()
-            dist_max = df_comb['distance_km'].max()
+    filtered = run_filter(cfg, folder)
+    if filtered.empty:
+        return html.Div(f"No anomalies found for the current filters and period in '{folder}'.",
+                        className='lf-msg lf-msg-warn')
 
-            box_style = {
-                'flex': '1', 'minWidth': '160px', 'padding': '14px 18px',
-                'borderRadius': '8px', 'backgroundColor': '#f0f4f8',
-                'border': '2px solid #2980b9', 'textAlign': 'center'
-            }
-            label_style = {'fontSize': '11px', 'color': '#7f8c8d', 'marginBottom': '4px'}
-            value_style = {'fontSize': '22px', 'fontWeight': 'bold', 'color': '#2980b9'}
+    map_html, warning = build_folium_map(folder, cfg, filtered, default_basemap='topo')
+    fig = build_timeseries_figure(filtered, cfg)
+    s, e = lfc.get_period(cfg)
+    stats = compute_ts_stats(filtered, s, e)
 
-            summary_panel = html.Div([
-                html.Div("📊 Period Summary (all satellites)", style={
-                    'fontWeight': 'bold', 'fontSize': '14px', 'color': '#2c3e50',
-                    'marginBottom': '10px'
-                }),
-                html.Div([
-                    html.Div([
-                        html.Div("Mean FRP", style=label_style),
-                        html.Div(f"{frp_mean:.1f} MW", style=value_style),
-                    ], style=box_style),
-                    html.Div([
-                        html.Div("Max FRP", style=label_style),
-                        html.Div(f"{frp_max:.1f} MW", style=value_style),
-                    ], style=box_style),
-                    html.Div([
-                        html.Div("Mean Distance", style=label_style),
-                        html.Div(f"{dist_mean:.2f} km", style=value_style),
-                    ], style=box_style),
-                    html.Div([
-                        html.Div("Max Distance", style=label_style),
-                        html.Div(f"{dist_max:.2f} km", style=value_style),
-                    ], style=box_style),
-                ], style={
-                    'display': 'flex', 'gap': '12px', 'flexWrap': 'wrap'
-                })
-            ], style={
-                'padding': '16px 20px', 'marginBottom': '20px',
-                'backgroundColor': 'white', 'borderRadius': '10px',
-                'boxShadow': '0 2px 8px rgba(0,0,0,0.08)'
-            })
-
-    # Build layout children, inserting shapefile warning if needed
-    layout_children = []
-
-    if shapefile_warning:
-        layout_children.append(
-            html.Div(shapefile_warning, style={
-                'backgroundColor': '#fff3cd', 'border': '1px solid #ffc107',
-                'borderRadius': '6px', 'padding': '10px 16px',
-                'marginBottom': '10px', 'color': '#856404', 'fontWeight': 'bold'
-            })
-        )
-
-    if summary_panel:
-        layout_children.append(summary_panel)
-
-    # Map container: limited width and centered horizontally
-    layout_children += [
-        html.Div(
-            [html.Iframe(srcDoc=map_html, width='100%', height='600px',
-                         style={'border': 'none', 'borderRadius': '8px'})],
-            style={
-                'marginBottom': '20px', 'padding': '5px',
-                'maxWidth': '1100px', 'margin': '0 auto 20px auto'
-            }
-        ),
-        html.Div([dcc.Graph(figure=fig, config={
-            'toImageButtonOptions': {
-                'format': 'png', 'filename': f'{volcano}_analysis',
-                'height': 900, 'width': 1200, 'scale': 3
-            },
-            'displaylogo': False
-        })])
+    children = []
+    if warning:
+        children.append(html.Div(warning, className='lf-msg lf-msg-warn'))
+    children += [
+        html.Div([
+            html.Iframe(srcDoc=map_html, className='lf-map-frame',
+                        style={'height': 'clamp(380px, 62vh, 760px)'}),
+        ], className='lf-card', style={'padding': '6px'}),
+        html.Div([
+            html.Div(id='mapper-ts-stats', children=build_ts_stats_panel(stats)),
+            dcc.Graph(id='mapper-ts-graph', figure=fig, className='lf-graph',
+                      style={'height': 'clamp(520px, 75vh, 900px)'},
+                      config={'responsive': True, 'displaylogo': False,
+                              'toImageButtonOptions': {'format': 'png', 'filename': f'{lfc.safe_name(volcano)}_timeseries',
+                                                       'height': 900, 'width': 1200, 'scale': 3}}),
+        ], className='lf-card'),
     ]
+    return html.Div(children)
 
-    return html.Div(layout_children)
+
+# ==========================================
+# 5. CALLBACKS
+# ==========================================
+_CACHE = {'key': None, 'df': None}
+
+
+def _cached_filtered():
+    folder = get_active_folder()
+    if not folder:
+        return pd.DataFrame()
+    fp = os.path.join(folder, "filter_VIIRS_combined.csv")
+    if not os.path.exists(fp):
+        return pd.DataFrame()
+    key = (fp, os.path.getmtime(fp))
+    if _CACHE['key'] != key:
+        _CACHE['key'], _CACHE['df'] = key, lfc.load_filtered_data(folder)
+    return _CACHE['df']
+
+
+def register_callbacks(app):
+    @app.callback(
+        Output('mapper-ts-stats', 'children'),
+        Input('mapper-ts-graph', 'relayoutData'),
+        prevent_initial_call=True
+    )
+    def update_ts_stats(relayout):
+        df = _cached_filtered()
+        if df.empty:
+            return no_update
+        s, e = lfc.get_period()
+        x0, x1 = lfc.xrange_from_relayout(relayout, fallback=(None, None))
+        if x0 is None and relayout and not any(k.endswith('autorange') for k in relayout):
+            return no_update          # e.g. legend click / y-zoom only
+        if x0 is None:
+            x0, x1 = s, e
+        return build_ts_stats_panel(compute_ts_stats(df, x0, x1))
 
 
 if __name__ == "__main__":
     from dash import Dash
-
     app = Dash(__name__)
     app.layout = get_layout()
+    register_callbacks(app)
     app.run(debug=True, port=8070)
