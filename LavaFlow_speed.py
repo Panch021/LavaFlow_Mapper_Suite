@@ -1,223 +1,211 @@
-import pandas as pd
+"""
+LavaFlow_speed.py
+=================
+Propagation speed of the flow front, estimated from the days on which the
+maximum distance to the vent increases.
+
+Max distance, max speed and mean speed are recomputed for the time
+window visible in the chart (zoom / pan / reset). A button on the chart
+shows or hides the reference radius.
+"""
+import os
+
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import os
-from datetime import datetime
-from dash import html, dcc
+from dash import html, dcc, Input, Output, no_update
 
+import lavaflow_common as lfc
 
-# ==========================================
-# 0. CONFIGURATION & DIRECTORY HELPERS
-# ==========================================
-
-def get_active_folder():
-    """
-    Returns the full relative folder path of the active project
-    (e.g. 'projects/Wolf_2022' or 'examples/Sangay_2023').
-    Works with both the new path-based active_volcano.txt and legacy name-only entries.
-    """
-    if os.path.exists("active_volcano.txt"):
-        with open("active_volcano.txt", "r") as f:
-            path = f.read().strip()
-        if os.path.isdir(path):
-            return path          # new format: full relative path
-        # Legacy fallback: treat as bare folder name in root
-        legacy = path.replace(" ", "_")
-        if os.path.isdir(legacy):
-            return legacy
-    return None
-
-
-def load_global_config():
-    """Load variables from the active volcano subfolder config."""
-    folder = get_active_folder()
-    if not folder:
-        return {}
-    folder_name = os.path.basename(folder)          # e.g. 'Wolf_2022'
-    config_path = os.path.join(folder, f"config_{folder_name}.txt")
-
-    config = {}
-    if not os.path.exists(config_path):
-        return config
-
-    with open(config_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                key, value = line.split("=", 1)
-                val = value.strip()
-                if val.lower() == 'true':
-                    config[key.strip()] = True
-                elif val.lower() == 'false':
-                    config[key.strip()] = False
-                else:
-                    try:
-                        config[key.strip()] = float(val) if "." in val else int(val)
-                    except ValueError:
-                        config[key.strip()] = val
-    return config
+get_active_folder = lfc.get_active_folder
+load_global_config = lfc.load_global_config
 
 
 # ==========================================
 # 1. DATA ENGINE
 # ==========================================
-
-def process_speed_data():
-    """Calculate propagation speed and prevent 'inf' values."""
-    folder = get_active_folder()
-    if not folder: return None
-
-    input_file = os.path.join(folder, "max_distance_per_day_VIIRS.csv")
-    if not os.path.exists(input_file): return None
-
-    df = pd.read_csv(input_file)
-    df['date'] = pd.to_datetime(df['date_only'])
-    df = df.sort_values('date').reset_index(drop=True)
-
-    df['max_distance'] = df['distance_km'].cummax()
-    df['prev_max'] = df['max_distance'].shift(1, fill_value=0)
-    processed = df[df['distance_km'] > df['prev_max']].copy()
-
-    if not processed.empty:
-        processed['time_diff'] = processed['date'].diff().dt.total_seconds() / 3600  # hours
-        processed['distance_diff'] = (processed['max_distance'] - processed['prev_max']) * 1000  # meters
-
-        processed['speed'] = np.where(processed['time_diff'] > 0,
-                                      processed['distance_diff'] / processed['time_diff'], 0)
-
-        output_path = os.path.join(folder, "LavaFlow_propagation.csv")
-        processed.to_csv(output_path, index=False)
-
-    return processed
+def compute_speed(daily):
+    """
+    daily: DataFrame with 'date_only' and 'distance_km' (one or more rows per day).
+    Rows from different satellites on the same day are merged first (daily
+    maximum), otherwise same-day records produced artificial zero speeds.
+    Returns the days on which the running maximum distance increased, with
+    the speed (m/h) relative to the previous advance. The first advance has
+    no reference and therefore no speed (NaN).
+    """
+    d = daily.copy()
+    d['date'] = pd.to_datetime(d['date_only'])
+    d = d.groupby('date', as_index=False)['distance_km'].max().sort_values('date')
+    d['max_distance'] = d['distance_km'].cummax()
+    d['prev_max'] = d['max_distance'].shift(1, fill_value=0)
+    p = d[d['distance_km'] > d['prev_max']].copy()
+    if p.empty:
+        return p
+    p['time_diff'] = p['date'].diff().dt.total_seconds() / 3600.0       # hours
+    p['distance_diff'] = (p['max_distance'] - p['prev_max']) * 1000.0    # metres
+    p['speed'] = np.where(p['time_diff'] > 0, p['distance_diff'] / p['time_diff'], np.nan)
+    return p.reset_index(drop=True)
 
 
-# ==========================================
-# 2. DASHBOARD GENERATOR
-# ==========================================
-
-def get_layout():
-    """Generate speed report with linear scale and external summary."""
-    folder = get_active_folder()
-    cfg = load_global_config()
-
+def process_speed_data(folder=None):
+    folder = folder or get_active_folder()
     if not folder:
-        return html.Div("⚠️ No active project found. Please configure a volcano first.",
-                        style={'textAlign': 'center', 'padding': '20px', 'color': '#e74c3c'})
+        return None
+    fp = os.path.join(folder, "max_distance_per_day_VIIRS.csv")
+    if not os.path.exists(fp):
+        return None
+    p = compute_speed(pd.read_csv(fp))
+    if not p.empty:
+        p.to_csv(os.path.join(folder, "LavaFlow_propagation.csv"), index=False)
+    return p
 
-    speed_path = os.path.join(folder, "max_distance_per_day_VIIRS.csv")
-    if not os.path.exists(speed_path):
-        return html.Div([
-            html.P("⚠️ No mapper results found.",
-                   style={'color': '#e74c3c', 'fontWeight': 'bold', 'fontSize': '16px'}),
-            html.P("Please run the 🌋 LavaFlow Mapper (Tab 4) first to generate the required data.",
-                   style={'color': '#7f8c8d'})
-        ], style={'textAlign': 'center', 'padding': '40px'})
 
-    volcano_name = cfg.get('volcano', folder.replace("_", " ") if folder else 'Volcano')
-    data = process_speed_data()
+def load_speed_data(folder=None):
+    folder = folder or get_active_folder()
+    fp = os.path.join(folder, "LavaFlow_propagation.csv") if folder else None
+    if not fp or not os.path.exists(fp):
+        return pd.DataFrame()
+    df = pd.read_csv(fp)
+    df['date'] = lfc.parse_firms_date(df['date'])
+    return df.dropna(subset=['date'])
 
-    if data is None or data.empty:
-        return html.Div("No propagation data found (run Mapper first).",
-                        style={'textAlign': 'center', 'padding': '20px', 'color': '#e74c3c'})
 
-    start_str = data['date'].min().strftime('%Y-%m-%d')
-    end_str = data['date'].max().strftime('%Y-%m-%d')
+def compute_speed_stats(df, x0=None, x1=None):
+    d = df
+    if x0 is not None and not pd.isna(x0):
+        d = d[d['date'] >= pd.Timestamp(x0)]
+    if x1 is not None and not pd.isna(x1):
+        d = d[d['date'] <= pd.Timestamp(x1)]
+    sp = d['speed'].dropna() if 'speed' in d else pd.Series(dtype=float)
+    return {'n': int(len(d)),
+            'max_dist': float(d['max_distance'].max()) if len(d) else None,
+            'max_speed': float(sp.max()) if len(sp) else None,
+            'mean_speed': float(sp.mean()) if len(sp) else None,
+            'x0': x0, 'x1': x1}
 
-    # Drop NaN before computing speed statistics to avoid misleading results
-    speed_valid = data['speed'].dropna()
-    max_speed = speed_valid.max() if not speed_valid.empty else 0
-    avg_speed = speed_valid.mean() if not speed_valid.empty else 0
-    max_dist = data['max_distance'].max()
 
+# ==========================================
+# 2. FIGURE & PANEL (shared with the export)
+# ==========================================
+def build_speed_figure(df, cfg, title=True):
     fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig.add_trace(go.Scatter(x=df['date'], y=df['max_distance'], name="Max distance",
+                             mode='lines+markers', line=dict(color='black', width=2, dash='dash'),
+                             marker=dict(size=7),
+                             hovertemplate="%{x|%d/%m/%Y}<br>Max distance: %{y:.2f} km<extra></extra>"),
+                  secondary_y=False)
+    fig.add_trace(go.Scatter(x=df['date'], y=df['speed'], name="Propagation speed",
+                             mode='lines+markers', connectgaps=True,
+                             line=dict(color='#c0392b', width=2, dash='dot'),
+                             marker=dict(size=8, symbol='diamond'),
+                             hovertemplate="%{x|%d/%m/%Y}<br>Speed: %{y:.1f} m/h<extra></extra>"),
+                  secondary_y=True)
 
-    # Max Distance Trace (Primary Y Axis)
-    fig.add_trace(
-        go.Scatter(x=data['date'], y=data['max_distance'], name="Max Distance",
-                   mode='lines+markers', line=dict(color='black', width=2, dash='dash'),
-                   marker=dict(size=8, symbol='circle')),
-        secondary_y=False
-    )
+    menus = []
+    if cfg.get('include_reference_radius') and not df.empty:
+        rk = float(cfg.get('ref_radius_m', 5000)) / 1000.0
+        pad = pd.Timedelta(days=1)
+        fig.add_trace(go.Scatter(x=[df['date'].min() - pad, df['date'].max() + pad], y=[rk, rk], mode='lines',
+                                 name=f"Ref. radius ({rk:.2f} km)", line=dict(color='#2980b9', width=1.5, dash='dash'),
+                                 hovertemplate=f"Ref. radius: {rk:.2f} km<extra></extra>"), secondary_y=False)
+        idx = len(fig.data) - 1
+        menus = [dict(type='buttons', direction='right', x=1.0, xanchor='right', y=1.02, yanchor='bottom',
+                      showactive=True, active=0, pad=dict(r=2, t=2, b=2, l=2), font=dict(size=11),
+                      bgcolor='white', bordercolor='#cfd4da',
+                      buttons=[dict(label='Radius on', method='restyle', args=[{'visible': True}, [idx]]),
+                               dict(label='Radius off', method='restyle', args=[{'visible': False}, [idx]])])]
 
-    # Speed Trace (Secondary Y Axis)
-    fig.add_trace(
-        go.Scatter(x=data['date'], y=data['speed'], name="Prop. Speed",
-                   mode='lines+markers', line=dict(color='red', width=2, dash='dot'),
-                   marker=dict(size=8, symbol='diamond')),
-        secondary_y=True
-    )
-
-    # ---- Reference radius line on the Max Distance (primary) axis ----
-    # Shown only when include_reference_radius=True in the config. Plotted as
-    # a regular trace on the primary y-axis so it shares the same scale as
-    # Max Distance. Appears in the legend, so the user can toggle it from
-    # there without needing an extra button.
-    has_ref_radius = bool(cfg.get('include_reference_radius'))
-    if has_ref_radius:
-        ref_radius_km = cfg.get('ref_radius_m', 5000) / 1000.0
-        fig.add_trace(
-            go.Scatter(
-                x=[data['date'].min(), data['date'].max()],
-                y=[ref_radius_km, ref_radius_km],
-                mode='lines',
-                line=dict(color='#1f77b4', width=2, dash='dash'),
-                name=f"Ref. radius ({ref_radius_km:.2f} km)",
-                hovertemplate=f"Ref. radius: {ref_radius_km:.2f} km<extra></extra>",
-            ),
-            secondary_y=False
-        )
-
+    s = df['date'].min().strftime('%d/%m/%Y') if not df.empty else ''
+    e = df['date'].max().strftime('%d/%m/%Y') if not df.empty else ''
     fig.update_layout(
-        title=dict(text=f"{volcano_name} - Lava Flow Propagation Speed<br>{start_str} to {end_str}",
-                   x=0.5, font=dict(size=20)),
-        template="plotly_white",
-        height=600, width=1100,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
-        margin=dict(t=80, b=100, l=80, r=80)
-    )
+        title=dict(text=f"Lava flow propagation — {cfg.get('volcano', '')}<br><sup>{s} – {e}</sup>",
+                   x=0.5, font=dict(size=17)) if title else None,
+        template="plotly_white", autosize=True, updatemenus=menus, uirevision='speed',
+        legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5),
+        margin=dict(t=80 if title else 40, b=60, l=70, r=70))
+    fig.update_xaxes(gridcolor='#eee')
+    fig.update_yaxes(title_text="Maximum distance (km)", secondary_y=False, rangemode='tozero', gridcolor='#eee')
+    fig.update_yaxes(title_text="Propagation speed (m/h)", secondary_y=True, color='#c0392b',
+                     rangemode='tozero', showgrid=False)
+    return fig
 
-    fig.update_xaxes(title_text="Date", gridcolor='lightgrey')
-    fig.update_yaxes(title_text="Maximum Distance (km)", secondary_y=False,
-                     gridcolor='lightgrey', rangemode='tozero')
-    fig.update_yaxes(title_text="Propagation Speed (m/h)", secondary_y=True,
-                     type="linear", color="red", gridcolor='rgba(255,0,0,0.05)')
 
-    master_config = {
-        'toImageButtonOptions': {
-            'format': 'png', 'filename': f"{volcano_name.replace(' ', '_')}_Speed",
-            'height': 800, 'width': 1200, 'scale': 3
-        },
-        'displaylogo': False
-    }
+def build_speed_panel(st):
+    def f(v, unit, dec):
+        return f"{v:.{dec}f} {unit}" if v is not None else "–"
 
-    summary_header = html.Div([
-        html.Div([
-            html.Strong("Max Distance: "), f"{max_dist:.2f} km"
-        ], style={'padding': '15px', 'backgroundColor': '#f8f9fa', 'borderRadius': '8px',
-                  'border': '1px solid #ddd', 'textAlign': 'center', 'flex': '1', 'margin': '5px'}),
-
-        html.Div([
-            html.Strong("Max Speed: "), f"{max_speed:.1f} m/h"
-        ], style={'padding': '15px', 'backgroundColor': '#f8f9fa', 'borderRadius': '8px',
-                  'border': '1px solid #ddd', 'textAlign': 'center', 'flex': '1', 'margin': '5px'}),
-
-        html.Div([
-            html.Strong("Mean Speed: "), f"{avg_speed:.1f} m/h"
-        ], style={'padding': '15px', 'backgroundColor': '#f8f9fa', 'borderRadius': '8px',
-                  'border': '1px solid #ddd', 'textAlign': 'center', 'flex': '1', 'margin': '5px'}),
-    ], style={'display': 'flex', 'justifyContent': 'space-around', 'marginBottom': '20px',
-              'maxWidth': '1100px', 'marginLeft': 'auto', 'marginRight': 'auto'})
+    def fmt(x):
+        return pd.Timestamp(x).strftime('%d/%m/%Y') if x is not None and not pd.isna(x) else '–'
 
     return html.Div([
-        summary_header,
-        dcc.Graph(figure=fig, config=master_config)
-    ], style={'padding': '20px'})
+        html.Div([html.Span("Statistics for the visible window: ", style={'fontWeight': '600'}),
+                  html.Span(f"{fmt(st['x0'])} → {fmt(st['x1'])} · {st['n']} advances", className='lf-muted'),
+                  html.Span("  (zoom or pan to update; double-click to reset)", className='lf-muted')]),
+        html.Div([
+            html.Div([html.Div("Max distance", className='k'), html.Div(f(st['max_dist'], 'km', 2), className='v')],
+                     className='lf-stat'),
+            html.Div([html.Div("Max speed", className='k'), html.Div(f(st['max_speed'], 'm/h', 1), className='v')],
+                     className='lf-stat alert'),
+            html.Div([html.Div("Mean speed", className='k'), html.Div(f(st['mean_speed'], 'm/h', 1), className='v')],
+                     className='lf-stat accent'),
+        ], className='lf-stats'),
+    ])
+
+
+# ==========================================
+# 3. LAYOUT
+# ==========================================
+def get_layout():
+    folder = get_active_folder()
+    cfg = load_global_config()
+    if not folder:
+        return html.Div("No active project found. Please configure a volcano first.", className='lf-msg lf-msg-warn')
+    if not os.path.exists(os.path.join(folder, "max_distance_per_day_VIIRS.csv")):
+        return html.Div("No mapper results found. Run the LavaFlow Mapper (tab 5) first.",
+                        className='lf-msg lf-msg-warn')
+
+    process_speed_data(folder)
+    data = load_speed_data(folder)
+    if data.empty:
+        return html.Div("No propagation data found (run the Mapper first).", className='lf-msg lf-msg-warn')
+
+    volcano = cfg.get('volcano', 'Volcano')
+    fig = build_speed_figure(data, cfg)
+    return html.Div([
+        html.Div([
+            html.Div(id='speed-stats', children=build_speed_panel(compute_speed_stats(data))),
+            dcc.Graph(id='speed-graph', figure=fig, className='lf-graph',
+                      style={'height': 'clamp(420px, 65vh, 800px)'},
+                      config={'responsive': True, 'displaylogo': False,
+                              'toImageButtonOptions': {'format': 'png', 'filename': f"{lfc.safe_name(volcano)}_speed",
+                                                       'height': 800, 'width': 1200, 'scale': 3}}),
+            html.P("Speed = increase of the maximum distance between two consecutive advances divided by the "
+                   "elapsed time. Detections of different satellites on the same day are merged (daily maximum).",
+                   className='lf-muted'),
+        ], className='lf-card'),
+    ])
+
+
+# ==========================================
+# 4. CALLBACKS
+# ==========================================
+def register_callbacks(app):
+    @app.callback(Output('speed-stats', 'children'), Input('speed-graph', 'relayoutData'),
+                  prevent_initial_call=True)
+    def update_speed_stats(relayout):
+        df = load_speed_data()
+        if df.empty:
+            return no_update
+        x0, x1 = lfc.xrange_from_relayout(relayout, fallback=(None, None))
+        if x0 is None and relayout and not any(k.endswith('autorange') for k in relayout):
+            return no_update
+        return build_speed_panel(compute_speed_stats(df, x0, x1))
 
 
 if __name__ == "__main__":
     from dash import Dash
-
     app = Dash(__name__)
     app.layout = get_layout()
+    register_callbacks(app)
     app.run(debug=True, port=8080)
