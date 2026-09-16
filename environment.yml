@@ -10,10 +10,13 @@ dependencies:
   - pip
   - pip:
     - dash>=2.11.0
-    - dash-leaflet>=0.1.21
+    - dash-leaflet>=1.0
     - pandas>=2.0.0
     - numpy>=1.24.0
     - requests>=2.31.0
     - plotly>=5.15.0
     - folium>=0.14.0
     - branca>=0.6.0
+    - matplotlib>=3.7
+    - pillow>=9.0
+    - imageio-ffmpeg>=0.4.8
