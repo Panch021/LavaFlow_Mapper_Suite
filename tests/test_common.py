@@ -132,3 +132,46 @@ def test_shapefile_path_resolution(project):
     open(os.path.join(project, "flow.shp"), "w").close()
     assert lfc.shapefile_path(cfg, project) == os.path.join(project, "flow.shp")
     assert lfc.shapefile_path({"include_shapefile": False, "shapefile_path": "flow"}, project) is None
+
+
+def test_update_config_values_keeps_other_keys(project):
+    before = lfc.load_global_config()
+    lfc.update_config_values(project, {"wpt_names": "A;B", "new_key": "42"})
+    text = open(lfc.config_path_for(project), encoding="utf-8").read()
+    assert "wpt_names=A;B" in text and "new_key=42" in text
+    after = lfc.load_global_config()
+    for k in ("volcano", "lats_vent", "filter_frp", "map_key", "start_day_str"):
+        assert after[k] == before[k]
+    assert text.count("wpt_names=") == 1
+
+
+def test_waypoint_fields():
+    f = lfc.waypoint_fields([{"name": "A", "lat": -0.4123456, "lon": -91.5, "symbol": "triangle"},
+                             {"name": "", "lat": 1, "lon": 2}])
+    assert f["wpt_names"] == "A;"
+    assert f["wpt_lats"] == "-0.41235;1.00000"
+    assert f["wpt_symbols"] == "triangle;circle"
+
+
+def test_center_zoom_for_bounds():
+    # Fernandina 2024: flow of ~8.5 x 16.8 km -> fits in a 900x430 px map at zoom ~11.75
+    center, zoom = lfc.center_zoom_for_bounds([[-0.5109, -91.5305], [-0.3601, -91.4542]])
+    assert center == pytest.approx([-0.4355, -91.49235], abs=1e-4)
+    assert 11 <= zoom <= 12.5
+    assert (zoom / lfc.ZOOM_STEP) % 1 == 0                       # multiple of the zoom step
+    # a smaller area zooms in further, a huge one zooms out, and limits are respected
+    assert lfc.center_zoom_for_bounds([[-0.401, -91.501], [-0.399, -91.499]])[1] == 17
+    assert lfc.center_zoom_for_bounds([[-40, -120], [40, -40]])[1] <= 4
+    assert lfc.center_zoom_for_bounds([[0, 0], [0, 0]])[1] >= 1   # degenerate box, no crash
+
+
+def test_center_zoom_never_crops_the_data():
+    import math
+    bounds = [[-0.51, -91.53], [-0.36, -91.45]]
+    (s, w), (n, e) = bounds
+    _, zoom = lfc.center_zoom_for_bounds(bounds, width_px=900, height_px=430)
+    world_px = 256 * 2 ** zoom
+    visible_lon = 360 * 900 / world_px
+    y = lambda lat: math.log(math.tan(math.pi / 4 + math.radians(lat) / 2))
+    visible_y = 2 * math.pi * 430 / world_px
+    assert visible_lon >= (e - w) and visible_y >= (y(n) - y(s))

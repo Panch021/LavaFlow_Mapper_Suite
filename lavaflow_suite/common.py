@@ -204,6 +204,68 @@ def parse_waypoints_from_config(c, keep_empty=False):
     return out
 
 
+
+def waypoint_fields(wpts):
+    """The four ';'-separated config strings for a list of waypoint dicts."""
+    return {
+        'wpt_names': ';'.join(str(w.get('name') or '') for w in wpts),
+        'wpt_lats': ';'.join('' if w.get('lat') is None else f"{float(w['lat']):.5f}" for w in wpts),
+        'wpt_lons': ';'.join('' if w.get('lon') is None else f"{float(w['lon']):.5f}" for w in wpts),
+        'wpt_symbols': ';'.join(str(w.get('symbol') or 'circle') for w in wpts),
+    }
+
+
+def update_config_values(folder, updates):
+    """
+    Updates only the given keys of the project's config file, keeping every other
+    line (and their order) untouched. Missing keys are appended. Returns the path.
+    """
+    cp = config_path_for(folder)
+    lines = []
+    if os.path.exists(cp):
+        with open(cp, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    remaining = dict(updates)
+    out = []
+    for line in lines:
+        if "=" in line and not line.strip().startswith("#"):
+            key = line.split("=", 1)[0].strip()
+            if key in remaining:
+                out.append(f"{key}={remaining.pop(key)}")
+                continue
+        out.append(line)
+    out += [f"{k}={v}" for k, v in remaining.items()]
+    with open(cp, "w", encoding="utf-8") as f:
+        f.write("\n".join(out).rstrip("\n") + "\n")
+    return cp
+
+
+
+ZOOM_STEP = 0.25            # dash-leaflet map uses zoomSnap=ZOOM_STEP so the fit can be fractional
+
+
+def center_zoom_for_bounds(bounds, width_px=900, height_px=430, max_zoom=17, margin=0.94):
+    """
+    (center, zoom) that shows `bounds` ([[s, w], [n, e]]) in a map of the given
+    pixel size, with a small margin. dash-leaflet only honours center/zoom on the
+    initial render, so the fit has to be computed here instead of using fitBounds.
+    The zoom is a multiple of ZOOM_STEP, rounded down so nothing is cropped.
+    """
+    (s, w), (n, e) = bounds
+    lat_c, lon_c = (s + n) / 2.0, (w + e) / 2.0
+    d_lon = max(abs(e - w), 1e-4)
+
+    def merc_y(lat):
+        lat = max(min(lat, 85.05), -85.05)
+        return math.log(math.tan(math.pi / 4 + math.radians(lat) / 2))
+
+    d_y = max(abs(merc_y(n) - merc_y(s)), 1e-6)
+    z_lon = math.log2(360.0 * width_px * margin / (256.0 * d_lon))
+    z_lat = math.log2(2 * math.pi * height_px * margin / (256.0 * d_y))
+    zoom = math.floor(min(z_lon, z_lat) / ZOOM_STEP) * ZOOM_STEP
+    return [lat_c, lon_c], max(1.0, min(zoom, float(max_zoom)))
+
+
 # ------------------------------------------------------------------
 # Dates & data
 # ------------------------------------------------------------------

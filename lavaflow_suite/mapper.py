@@ -22,7 +22,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import folium
 import branca.colormap as bcm
-from dash import html, dcc, Input, Output, no_update
+from dash import html, dcc, Input, Output, State, ALL, no_update
 
 try:
     from folium.plugins import RegularPolygonMarker
@@ -210,6 +210,102 @@ def build_basemap_fallback_script(map_var, topo_var, esri_var):
     </script>"""
 
 
+
+def build_capture_script(map_var):
+    """
+    Adds an 'Add waypoints' control to the folium map. While the control is
+    active every click drops a numbered marker and sends the coordinates to the
+    Dash page (postMessage), where they can be named and saved into the project
+    configuration. The map itself never stores anything.
+    """
+    return """
+<script>
+(function () {
+  function init() {
+    var map = window[""" + f"'{map_var}'" + """];
+    if (!map || !window.L) { setTimeout(init, 300); return; }
+
+    var active = false, markers = [], n = 0;
+
+    // While capturing, the anomalies / shapefile / waypoints must not swallow the click.
+    // Leaflet forces 'pointer-events: auto' on every interactive element, so the rule has
+    // to be !important and target the elements themselves, not only their pane.
+    var css = document.createElement('style');
+    css.textContent = '.lf-capturing .leaflet-interactive,' +
+                      '.lf-capturing .leaflet-marker-icon,' +
+                      '.lf-capturing .leaflet-tooltip { pointer-events: none !important; }' +
+                      '.lf-capturing .leaflet-control, .lf-capturing .leaflet-control * ' +
+                      '{ pointer-events: auto !important; }';
+    document.head.appendChild(css);
+
+    function setCapturing(on) {
+      var c = map.getContainer();
+      if (on) { c.classList.add('lf-capturing'); map.closePopup(); }
+      else { c.classList.remove('lf-capturing'); }
+      c.style.cursor = on ? 'crosshair' : '';
+    }
+
+    var Ctl = L.Control.extend({
+      options: {position: 'topleft'},
+      onAdd: function () {
+        var d = L.DomUtil.create('div', 'leaflet-bar lf-capture-ctl');
+        d.innerHTML = '<a href="#" title="Capture coordinates: click on the map to add waypoints">' +
+                      '&#128205; Add waypoints</a>';
+        d.style.background = 'white';
+        d.firstChild.style.cssText = 'padding:0 8px;width:auto;font:600 12px/26px system-ui,sans-serif;' +
+                                     'white-space:nowrap;text-decoration:none;color:#222;';
+        L.DomEvent.disableClickPropagation(d);
+        L.DomEvent.on(d.firstChild, 'click', function (e) {
+          L.DomEvent.preventDefault(e);
+          active = !active;
+          d.firstChild.style.background = active ? '#f39c12' : '';
+          d.firstChild.style.color = active ? 'white' : '#222';
+          d.firstChild.innerHTML = active ? '&#128205; Capturing… (click to stop)'
+                                          : '&#128205; Add waypoints';
+          setCapturing(active);
+          post({action: active ? 'on' : 'off'});
+        });
+        return d;
+      }
+    });
+    map.addControl(new Ctl());
+
+    function post(msg) {
+      msg.source = 'lavaflow-capture';
+      try { window.parent.postMessage(msg, '*'); } catch (e) {}
+    }
+
+    map.on('click', function (ev) {
+      if (!active) return;
+      n += 1;
+      var lat = Math.round(ev.latlng.lat * 1e5) / 1e5;
+      var lon = Math.round(ev.latlng.lng * 1e5) / 1e5;
+      var mk = L.marker(ev.latlng, {
+        icon: L.divIcon({className: '', iconSize: [16, 16], iconAnchor: [8, 8],
+          html: '<div style="width:14px;height:14px;border-radius:50%;background:#f39c12;' +
+                'border:2px solid #222;box-sizing:border-box;"></div>'})
+      }).addTo(map);
+      mk.bindTooltip('WP ' + n + '<br>' + lat.toFixed(5) + ', ' + lon.toFixed(5),
+                     {direction: 'right', offset: [8, 0]});
+      markers.push(mk);
+      post({action: 'add', lat: lat, lon: lon, index: n});
+    });
+
+    window.addEventListener('message', function (ev) {
+      var d = ev.data || {};
+      if (d.source !== 'lavaflow-capture-parent') return;
+      if (d.action === 'clear') {
+        markers.forEach(function (m) { map.removeLayer(m); });
+        markers = []; n = 0;
+      }
+    });
+  }
+  init();
+})();
+</script>
+"""
+
+
 def build_refit_script(bounds):
     """Re-fits the map once the (i)frame has its final size. Inside a lazily laid-out
     iframe the initial fitBounds runs on a 0-px map and ends at the wrong zoom."""
@@ -255,7 +351,7 @@ def add_waypoint_marker(feature_group, lat, lon, name, symbol, permanent_label=F
         folium.CircleMarker([lat, lon], radius=6, **kw).add_to(feature_group)
 
 
-def build_folium_map(folder, cfg, df, labels=False, fit='all', default_basemap='esri'):
+def build_folium_map(folder, cfg, df, labels=False, fit='all', default_basemap='esri', capture=False):
     """
     Folium map of the filtered anomalies. Returns (html, warning).
     The map is fitted to anomalies + vent (+ radius / waypoints only when
@@ -344,6 +440,8 @@ def build_folium_map(folder, cfg, df, labels=False, fit='all', default_basemap='
         w_, e = w_ - 0.005, e + 0.005
     bounds = [[s, w_], [n, e]]
     m.fit_bounds(bounds, padding=(20, 20))
+    if capture:
+        m.get_root().html.add_child(folium.Element(build_capture_script(m.get_name())))
     m.get_root().html.add_child(folium.Element(build_lock_zoom_script()))
     m.get_root().html.add_child(folium.Element(build_refit_script(bounds)))
     if topo_first:
@@ -453,6 +551,75 @@ def build_timeseries_figure(df, cfg, title=True):
 # ==========================================
 # 4. DASH LAYOUT
 # ==========================================
+
+# ==========================================
+# 4b. COORDINATE CAPTURE PANEL
+# ==========================================
+def captured_rows(points, names=None):
+    """
+    Editable rows (name + coordinates) for the points captured on the map.
+    `names` keeps the names already typed by the user when a new point arrives.
+    """
+    if not points:
+        return html.Div("Press “📍 Add waypoints” on the map, then click the locations you want to "
+                        "capture. They will appear here.", className='lf-muted')
+    names = names or []
+    rows = []
+    for i, p in enumerate(points):
+        typed = names[i] if i < len(names) and names[i] is not None else None
+        rows.append(html.Div([
+            dcc.Input(id={'type': 'cap-name', 'index': i}, type='text',
+                      value=typed if typed is not None else f"WP {i + 1}",
+                      placeholder='Name', style={'width': '150px'}),
+            html.Span(f"{float(p['lat']):.5f}, {float(p['lon']):.5f}", className='lf-mono',
+                      style={'marginLeft': '10px'}),
+        ], className='lf-inline', style={'marginBottom': '6px'}))
+    return html.Div(rows)
+
+
+def save_captured_waypoints(folder, points, names=None, symbol='circle', replace=False):
+    """
+    Adds the captured points to the project's waypoints (or replaces them) and
+    writes the configuration file. Returns (ok, message).
+    """
+    if not folder:
+        return False, "No active project."
+    pts = [p for p in (points or []) if p.get('lat') is not None and p.get('lon') is not None]
+    if not pts:
+        return False, "No captured coordinates to save."
+    cfg = lfc.load_global_config()
+    existing = [] if replace else parse_waypoints_from_config(cfg)
+    new = []
+    for i, p in enumerate(pts):
+        name = (names[i] if names and i < len(names) and names[i] else f"WP {len(existing) + i + 1}")
+        new.append({'name': str(name).strip(), 'lat': float(p['lat']), 'lon': float(p['lon']),
+                    'symbol': symbol})
+    wpts = existing + new
+    updates = lfc.waypoint_fields(wpts)
+    updates['include_reference_waypoint'] = True
+    lfc.update_config_values(folder, updates)
+    return True, (f"{len(new)} waypoint(s) saved — {len(wpts)} in total. "
+                  "Press RUN MAPPER ENGINE to redraw the map with them.")
+
+
+def capture_panel():
+    return html.Div([
+        html.H4("Captured coordinates"),
+        html.Div("Activate “📍 Add waypoints” on the map and click on it. The points are saved as "
+                 "project waypoints, so they also appear in the propagation, the video and the report.",
+                 className='lf-muted', style={'marginBottom': '8px'}),
+        dcc.Store(id='mapper-cap-store', data=[]),
+        dcc.Interval(id='mapper-cap-poll', interval=700),
+        html.Div(id='mapper-cap-rows', children=captured_rows([])),
+        html.Div([
+            html.Button("SAVE AS PROJECT WAYPOINTS", id='mapper-cap-save', n_clicks=0,
+                        className='lf-btn lf-btn-warn'),
+            html.Button("CLEAR", id='mapper-cap-clear', n_clicks=0, className='lf-btn'),
+        ], className='lf-inline', style={'marginTop': '10px'}),
+        html.Div(id='mapper-cap-msg', className='lf-muted', style={'marginTop': '8px'}),
+    ], className='lf-card')
+
+
 def get_layout():
     cfg = load_global_config()
     folder = get_active_folder()
@@ -465,7 +632,7 @@ def get_layout():
         return html.Div(f"No anomalies found for the current filters and period in '{folder}'.",
                         className='lf-msg lf-msg-warn')
 
-    map_html, warning = build_folium_map(folder, cfg, filtered, default_basemap='topo')
+    map_html, warning = build_folium_map(folder, cfg, filtered, default_basemap='topo', capture=True)
     fig = build_timeseries_figure(filtered, cfg)
     s, e = lfc.get_period(cfg)
     stats = compute_ts_stats(filtered, s, e)
@@ -478,6 +645,7 @@ def get_layout():
             html.Iframe(srcDoc=map_html, className='lf-map-frame',
                         style={'height': 'clamp(380px, 62vh, 760px)'}),
         ], className='lf-card', style={'padding': '6px'}),
+        capture_panel(),
         html.Div([
             html.Div(id='mapper-ts-stats', children=build_ts_stats_panel(stats)),
             dcc.Graph(id='mapper-ts-graph', figure=fig, className='lf-graph',
@@ -510,6 +678,55 @@ def _cached_filtered():
 
 
 def register_callbacks(app):
+    app.clientside_callback(
+        """
+        function (n, current) {
+            var pts = (window.__lavaflow && window.__lavaflow.points) || [];
+            if (JSON.stringify(pts) === JSON.stringify(current || [])) {
+                return window.dash_clientside.no_update;   // nothing new: keep what the user typed
+            }
+            return JSON.parse(JSON.stringify(pts));
+        }
+        """,
+        Output('mapper-cap-store', 'data'),
+        Input('mapper-cap-poll', 'n_intervals'),
+        State('mapper-cap-store', 'data'),
+    )
+
+    app.clientside_callback(
+        """
+        function (n) {
+            if (n) { window.__lavaflowClear && window.__lavaflowClear(); }
+            return '';
+        }
+        """,
+        Output('mapper-cap-msg', 'children', allow_duplicate=True),
+        Input('mapper-cap-clear', 'n_clicks'),
+        prevent_initial_call=True,
+    )
+
+    @app.callback(
+        Output('mapper-cap-rows', 'children'),
+        Input('mapper-cap-store', 'data'),
+        State({'type': 'cap-name', 'index': ALL}, 'value'),
+        prevent_initial_call=True,
+    )
+    def refresh_captured(points, names):
+        return captured_rows(points or [], names or [])
+
+    @app.callback(
+        Output('mapper-cap-msg', 'children'),
+        Input('mapper-cap-save', 'n_clicks'),
+        State('mapper-cap-store', 'data'),
+        State({'type': 'cap-name', 'index': ALL}, 'value'),
+        prevent_initial_call=True,
+    )
+    def save_captured(n_clicks, points, names):
+        if not n_clicks:
+            return no_update
+        ok, msg = save_captured_waypoints(get_active_folder(), points or [], names or [])
+        return ("✅ " if ok else "⚠️ ") + msg
+
     @app.callback(
         Output('mapper-ts-stats', 'children'),
         Input('mapper-ts-graph', 'relayoutData'),

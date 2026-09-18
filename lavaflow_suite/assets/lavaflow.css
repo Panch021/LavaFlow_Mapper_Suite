@@ -159,3 +159,7 @@ input:focus { outline: 2px solid rgba(41,128,185,0.35); border-color: var(--lf-a
 .lf-checks label { display: flex; align-items: center; gap: 6px; padding: 4px 0; cursor: pointer; }
 .lf-sidebar .lf-stat { flex: 1 1 90px; }
 .lf-sidebar .lf-stats-col .lf-stat { flex: 0 0 auto; padding: 8px 12px; }
+
+/* Coordinate capture (LavaFlow Mapper) */
+.lf-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.lf-capture-ctl a:hover { background: #f5f5f5; }
