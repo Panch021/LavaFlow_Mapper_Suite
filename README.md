@@ -3,6 +3,7 @@
 [![tests](https://github.com/Panch021/LavaFlow_Mapper_Suite/actions/workflows/tests.yml/badge.svg)](https://github.com/Panch021/LavaFlow_Mapper_Suite/actions/workflows/tests.yml)
 [![docs](https://readthedocs.org/projects/lavaflow-mapper-suite/badge/?version=latest)](https://lavaflow-mapper-suite.readthedocs.io)
 [![release](https://img.shields.io/github/v/release/Panch021/LavaFlow_Mapper_Suite)](https://github.com/Panch021/LavaFlow_Mapper_Suite/releases)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22832022.svg)](https://doi.org/10.5281/zenodo.22832022)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](pyproject.toml)
 
@@ -111,7 +112,10 @@ LavaFlow Mapper Suite is used at the Instituto Geofísico – Escuela Politécni
 for the monitoring of effusive eruptions. The methodology it implements has been applied in:
 
 * Vasconez F.J. et al. (2022). *Remote Sensing* 14, 3483. <https://doi.org/10.3390/rs14143483>
-* <!-- TODO: add publications, reports, bulletins and conference abstracts that used THIS software -->
+* Hidalgo S. et al. (2024). *Bulletin of Volcanology* 86, 4. <https://doi.org/10.1007/s00445-023-01685-6>
+* Coppola D. (2025). *Modern Volcano Monitoring*. <https://doi.org/10.1007/978-3-031-86841-2_11>
+* Ramayanti S. (2025). *Jurnal Ilmiah Pendidikan Fisika Al-Biruni* 14, 1. <https://doi.org/10.24042/jipfalbiruni.v14i1.26753>
+* Vasconez F.J. et al. (2026). *Bulletin of Volcanology* 88, 10. <https://doi.org/10.1007/s00445-026-02039-8>
 
 Have you used the suite? Please [tell us](https://github.com/Panch021/LavaFlow_Mapper_Suite/issues/new?labels=use-case)
 so we can list your work here.
@@ -136,7 +140,9 @@ Changes are listed in the [CHANGELOG](CHANGELOG.md).
 
 ## Citation
 
-If you use LavaFlow Mapper Suite, please cite the methodology paper (see also [CITATION.cff](CITATION.cff)):
+If you use LavaFlow Mapper Suite, please cite the software and the methodology paper (see also [CITATION.cff](CITATION.cff)):
+
+* Vasconez F.J. (2026). LavaFlow Mapper Suite (v2.1.0). Zenodo. <https://doi.org/10.5281/zenodo.22832022>
 
 * Vasconez F.J., Anzieta J.C., Müller A.V., Bernard B., Ramón P. (2022). A Near Real-Time and Free Tool for the
   Preliminary Mapping of Active Lava Flows during Volcanic Crises: The Case of Hotspot Subaerial Eruptions.

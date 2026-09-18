@@ -9,6 +9,11 @@ version: 2.1.0
 date-released: 2026-09-17
 license: GPL-3.0-or-later
 repository-code: "https://github.com/Panch021/LavaFlow_Mapper_Suite"
+doi: 10.5281/zenodo.22832022
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.22832023
+    description: "Version 2.1.0"
 keywords: [volcano, lava flow, VIIRS, MODIS, FIRMS, thermal remote sensing, hazard assessment]
 authors:
   - family-names: Vasconez
