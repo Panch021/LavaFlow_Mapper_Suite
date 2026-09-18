@@ -1,0 +1,35 @@
+name: release
+
+# Push a tag such as v2.1.0 to build the package and publish a GitHub release.
+# Connect the repository to Zenodo (https://zenodo.org/account/settings/github/)
+# before the first release so that every release gets a DOI automatically.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install build
+      - run: python -m build
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          python - <<'PY'
+          import os, re
+          tag = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(rf"^## \[{re.escape(tag)}\].*?\n(.*?)(?=^## \[|\Z)", text, re.S | re.M)
+          open("release_notes.md", "w", encoding="utf-8").write(m.group(1).strip() if m else "")
+          PY
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          files: dist/*

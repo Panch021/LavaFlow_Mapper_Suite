@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://lavaflow-mapper-suite.readthedocs.io
+    about: Installation, user guide and troubleshooting

@@ -1,0 +1,42 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Steps to reproduce, what you expected and what you got.
+    validations:
+      required: true
+  - type: input
+    id: tab
+    attributes:
+      label: Tab / module
+      placeholder: e.g. 6. LavaFlow Propagation
+  - type: input
+    id: volcano
+    attributes:
+      label: Volcano and analysis period
+      placeholder: e.g. Sangay, 01/01/2026 – 30/04/2026
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation method
+      options: [Pixi, Conda, pip, other]
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and Python version
+      placeholder: e.g. Windows 11, Python 3.11
+  - type: input
+    id: version
+    attributes:
+      label: LavaFlow Mapper Suite version
+      placeholder: output of `lavaflow-suite --version`
+  - type: textarea
+    id: log
+    attributes:
+      label: Error message / terminal output
+      description: Remove your FIRMS MAP_KEY before pasting.
+      render: text
