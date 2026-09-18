@@ -6,57 +6,20 @@ import os
 from datetime import datetime, timedelta
 from dash import html, dcc
 
+from . import common as lfc
+
 
 # ==========================================
 # 0. CONFIGURATION & DIRECTORY HELPERS
 # ==========================================
 
-def get_active_folder():
-    """
-    Returns the full relative folder path of the active project
-    (e.g. 'projects/Wolf_2022' or 'examples/Sangay_2023').
-    Works with both the new path-based active_volcano.txt and legacy name-only entries.
-    """
-    if os.path.exists("active_volcano.txt"):
-        with open("active_volcano.txt", "r") as f:
-            path = f.read().strip()
-        if os.path.isdir(path):
-            return path          # new format: full relative path
-        # Legacy fallback: treat as bare folder name in root
-        legacy = path.replace(" ", "_")
-        if os.path.isdir(legacy):
-            return legacy
-    return None
+# Shared with every other module (see common.py)
+get_active_folder = lfc.get_active_folder
 
 
 def load_global_config():
-    """Load variables from the active volcano subfolder config."""
-    folder = get_active_folder()
-    if not folder:
-        return {}
-    folder_name = os.path.basename(folder)          # e.g. 'Wolf_2022'
-    config_path = os.path.join(folder, f"config_{folder_name}.txt")
-
-    config = {}
-    if not os.path.exists(config_path):
-        return config
-
-    with open(config_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                key, value = line.split("=", 1)
-                val = value.strip()
-                if val.lower() == 'true':
-                    config[key.strip()] = True
-                elif val.lower() == 'false':
-                    config[key.strip()] = False
-                else:
-                    try:
-                        config[key.strip()] = float(val) if "." in val else int(val)
-                    except ValueError:
-                        config[key.strip()] = val
-    return config
+    """Config of the active project (no defaults injected)."""
+    return lfc.load_global_config(with_defaults=False)
 
 
 # ==========================================

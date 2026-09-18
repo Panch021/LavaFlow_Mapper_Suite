@@ -1,6 +1,6 @@
 """
-LavaFlow_mapper.py
-==================
+lavaflow_suite/mapper.py
+========================
 Filters the FIRMS VIIRS detections of the active project, computes the
 distance of each anomaly to the vent, saves the results
 (filter_VIIRS_combined.csv, max_distance_per_day_VIIRS.csv) and shows:
@@ -29,7 +29,7 @@ try:
 except ImportError:
     from folium.features import RegularPolygonMarker
 
-import lavaflow_common as lfc
+from . import common as lfc
 
 get_active_folder = lfc.get_active_folder
 load_global_config = lfc.load_global_config

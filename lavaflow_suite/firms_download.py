@@ -7,59 +7,20 @@ import numpy as np
 from datetime import datetime, date, timedelta
 from io import StringIO
 
+from . import common as lfc
+
 
 # ==========================================
 # 1. LOGIC: DIRECTORY & CONFIG MANAGEMENT
 # ==========================================
 
-def get_active_folder():
-    """
-    Returns the full relative folder path of the active project
-    (e.g. 'projects/Wolf_2022' or 'examples/Sangay_2023').
-    Works with both the new path-based active_volcano.txt and legacy name-only entries.
-    """
-    if os.path.exists("active_volcano.txt"):
-        with open("active_volcano.txt", "r") as f:
-            path = f.read().strip()
-        if os.path.isdir(path):
-            return path          # new format: full relative path
-        # Legacy fallback: treat as bare folder name in root
-        legacy = path.replace(" ", "_")
-        if os.path.isdir(legacy):
-            return legacy
-    return None
+# Shared with every other module (see common.py)
+get_active_folder = lfc.get_active_folder
 
 
 def load_global_config():
-    """
-    Load configuration from the active volcano subfolder.
-    """
-    folder = get_active_folder()
-    if not folder:
-        return {}
-    folder_name = os.path.basename(folder)          # e.g. 'Wolf_2022'
-    config_path = os.path.join(folder, f"config_{folder_name}.txt")
-
-    if not os.path.exists(config_path):
-        return {}
-
-    config = {}
-    with open(config_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                key, value = line.split("=", 1)
-                k, v = key.strip(), value.strip()
-                if v.lower() == 'true':
-                    config[k] = True
-                elif v.lower() == 'false':
-                    config[k] = False
-                else:
-                    try:
-                        config[k] = float(v) if "." in v else int(v)
-                    except ValueError:
-                        config[k] = v
-    return config
+    """Config of the active project (no defaults injected)."""
+    return lfc.load_global_config(with_defaults=False)
 
 
 def calculate_bbox(lat, lon, radius_m):

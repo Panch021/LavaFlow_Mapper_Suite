@@ -1,6 +1,6 @@
 """
-lavaflow_common.py
-==================
+lavaflow_suite/common.py
+========================
 Shared helpers used by every module of the LavaFlow Mapper Suite.
 
 Centralising these functions guarantees that all tabs (Anomalies Count,
@@ -17,6 +17,20 @@ import pandas as pd
 ACTIVE_FILE = "active_volcano.txt"
 EXAMPLES_DIR = "examples"
 PROJECTS_DIR = "projects"
+GVP_FILENAME = "GVP_Volcano_List_Holocene.csv"
+PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def gvp_catalogue_path():
+    """Path of the GVP Holocene catalogue.
+
+    A copy in the working directory takes precedence (so users can drop in
+    an updated list); otherwise the copy shipped with the package is used.
+    """
+    for cand in (GVP_FILENAME, os.path.join(PACKAGE_DIR, "data", GVP_FILENAME)):
+        if os.path.exists(cand):
+            return cand
+    return None
 
 # Satellite colours shared by every time-series figure
 SAT_COLORS = {'SNPP': '#f39c12', 'NOAA20': '#8e44ad', 'NOAA21': '#e74c3c'}

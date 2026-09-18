@@ -1,6 +1,6 @@
 """
-LavaFlow_animation.py
-=====================
+lavaflow_suite/animation.py
+===========================
 Interactive day-by-day playback of the filtered thermal anomalies and
 a RENDER button that saves the same animation as a portrait MP4
 (map on top, date bar, FRP/distance series below). The video uses the
@@ -17,8 +17,8 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-import lavaflow_common as lfc
-import LavaFlow_video as video
+from . import common as lfc
+from . import video as video
 
 get_active_folder = lfc.get_active_folder
 load_global_config = lfc.load_global_config

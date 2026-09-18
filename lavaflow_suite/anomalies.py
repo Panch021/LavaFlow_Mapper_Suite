@@ -1,6 +1,6 @@
 """
-Anomalies_count.py
-==================
+lavaflow_suite/anomalies.py
+===========================
 Weekly and monthly counts of FIRMS thermal anomalies per sensor.
 
 The bar charts and the "Period summary" panel are built from ONE shared
@@ -16,7 +16,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from dash import dcc, html, Input, Output, State
 
-import lavaflow_common as lfc
+from . import common as lfc
 
 get_active_folder = lfc.get_active_folder
 load_global_config = lfc.load_global_config

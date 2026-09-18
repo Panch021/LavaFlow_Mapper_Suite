@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lavaflow-mapper-suite"
+dynamic = ["version"]
+description = "Near-real-time mapping and monitoring of active lava flows from NASA/FIRMS thermal anomalies"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Francisco J. Vasconez", email = "fjvasconez@igepn.edu.ec" }]
+requires-python = ">=3.10"
+keywords = ["volcano", "lava flow", "VIIRS", "MODIS", "FIRMS", "remote sensing", "hazard"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+]
+dependencies = [
+    "dash>=2.11",
+    "dash-leaflet>=1.0",
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "requests>=2.31",
+    "plotly>=5.15",
+    "folium>=0.14",
+    "branca>=0.6",
+    "matplotlib>=3.7",
+    "pillow>=9.0",
+    "imageio-ffmpeg>=0.4.8",
+    "geopandas>=0.13",
+    "shapely>=2.0.1",
+    "pyproj>=3.5",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7", "pytest-cov"]
+docs = ["mkdocs>=1.5,<2", "mkdocs-material>=9"]
+dev = ["lavaflow-mapper-suite[test,docs]", "ruff"]
+
+[project.scripts]
+lavaflow-suite = "lavaflow_suite.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Panch021/LavaFlow_Mapper_Suite"
+Documentation = "https://lavaflow-mapper-suite.readthedocs.io"
+Issues = "https://github.com/Panch021/LavaFlow_Mapper_Suite/issues"
+Changelog = "https://github.com/Panch021/LavaFlow_Mapper_Suite/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+packages = ["lavaflow_suite"]
+
+[tool.setuptools.dynamic]
+version = { attr = "lavaflow_suite.__version__" }
+
+[tool.setuptools.package-data]
+lavaflow_suite = ["assets/*", "data/*.csv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+markers = ["slow: renders a real MP4 (deselect with -m \"not slow\")"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]   # syntax errors and undefined names only

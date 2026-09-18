@@ -1,6 +1,6 @@
 """
-Export_report.py
-================
+lavaflow_suite/report.py
+========================
 Builds a self-contained, responsive HTML report of the active project.
 
 Every figure is produced by the SAME builder used in the corresponding tab
@@ -20,12 +20,12 @@ from datetime import datetime
 import pandas as pd
 from dash import html, dcc, Input, Output, State, no_update
 
-import lavaflow_common as lfc
-import Anomalies_count as anomalies_module
-import LavaFlow_mapper as mapper_module
-import LavaFlow_speed as speed_module
-import LavaFlow_video as video
-import LavaFlow_animation as anim_module
+from . import common as lfc
+from . import anomalies as anomalies_module
+from . import mapper as mapper_module
+from . import speed as speed_module
+from . import video as video
+from . import animation as anim_module
 
 get_active_folder = lfc.get_active_folder
 load_global_config = lfc.load_global_config

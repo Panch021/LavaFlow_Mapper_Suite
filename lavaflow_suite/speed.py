@@ -1,6 +1,6 @@
 """
-LavaFlow_speed.py
-=================
+lavaflow_suite/speed.py
+=======================
 Propagation speed of the flow front, estimated from the days on which the
 maximum distance to the vent increases.
 
@@ -16,7 +16,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from dash import html, dcc, Input, Output, no_update
 
-import lavaflow_common as lfc
+from . import common as lfc
 
 get_active_folder = lfc.get_active_folder
 load_global_config = lfc.load_global_config

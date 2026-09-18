@@ -1,6 +1,6 @@
 """
-LavaFlow_video.py
-=================
+lavaflow_suite/video.py
+=======================
 Renders the LavaFlow Propagation animation to an MP4 file.
 
 Portrait layout (1080 x 1440 px):
@@ -38,7 +38,7 @@ from matplotlib.lines import Line2D
 import matplotlib.dates as mdates
 from matplotlib import animation
 
-import lavaflow_common as lfc
+from . import common as lfc
 
 R_EARTH = 6378137.0
 FIG_W, FIG_H, DPI = 10.8, 14.4, 100        # 1080 x 1440 px, portrait 3:4
