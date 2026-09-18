@@ -42,41 +42,28 @@ Originally developed to support volcanic crises in the Galápagos Islands and ba
 
 Full instructions: **[documentation › Installation](https://lavaflow-mapper-suite.readthedocs.io/en/latest/installation/)**.
 
-## 0. Git (required)
+### Git (required)
 
-The commands below clone the repository, so Git must be available. Check with `git --version`;
-if the command is not found, install it:
-
-=== "Windows"
-
-```powershell
-    winget install --id Git.Git -e
-```
-
-    Alternatively download [Git for Windows](https://git-scm.com/download/win) and run the commands
-    in *Git Bash*.
-
-=== "macOS"
+Check whether you already have it:
 
 ```bash
-    xcode-select --install
+git --version
 ```
 
-    Or, with [Homebrew](https://brew.sh): `brew install git`.
+If the command is not found, install it:
 
-=== "Linux"
+| System | Command / link |
+|---|---|
+| **Windows** | `winget install --id Git.Git -e` (PowerShell), or download [Git for Windows](https://git-scm.com/download/win) and use *Git Bash* for the commands below |
+| **macOS** | `xcode-select --install` (Apple Command Line Tools), or `brew install git` |
+| **Linux — Debian/Ubuntu** | `sudo apt update && sudo apt install git` |
+| **Linux — Fedora/RHEL** | `sudo dnf install git` |
+| **Linux — Arch** | `sudo pacman -S git` |
 
-```bash
-    sudo apt update && sudo apt install git     # Debian / Ubuntu
-    sudo dnf install git                        # Fedora / RHEL
-    sudo pacman -S git                          # Arch
-```
+Close and reopen the terminal, then run `git --version` again.
 
-Close and reopen the terminal afterwards.
-
-!!! tip "Without Git"
-    You can also click **Code → Download ZIP** on the repository page and unzip it. Updates then have
-    to be downloaded by hand, so Git is recommended.
+> Without Git you can still use the suite: on the repository page click **Code → Download ZIP** and unzip it.
+> Updates then have to be downloaded by hand, so Git is recommended.
 
 ### Pixi (recommended)
 
