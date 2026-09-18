@@ -1,5 +1,11 @@
 # 🌋 LavaFlow Mapper Suite
 
+[![tests](https://github.com/Panch021/LavaFlow_Mapper_Suite/actions/workflows/tests.yml/badge.svg)](https://github.com/Panch021/LavaFlow_Mapper_Suite/actions/workflows/tests.yml)
+[![docs](https://readthedocs.org/projects/lavaflow-mapper-suite/badge/?version=latest)](https://lavaflow-mapper-suite.readthedocs.io)
+[![release](https://img.shields.io/github/v/release/Panch021/LavaFlow_Mapper_Suite)](https://github.com/Panch021/LavaFlow_Mapper_Suite/releases)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](pyproject.toml)
+
 ## Overview
 
 `LavaFlow Mapper Suite` is an open-source Python application for the near-real-time mapping and monitoring of active lava flows using thermal satellite data from [NASA/FIRMS](https://firms.modaps.eosdis.nasa.gov/download/) (VIIRS and MODIS sensors). The software integrates data retrieval, processing, visualization, and reporting tools into a single graphical user interface (GUI), enabling users to rapidly assess lava flow propagation during volcanic eruptions.
@@ -31,13 +37,13 @@ Satellite thermal observations have become a cornerstone of modern volcano monit
 
 Originally developed to support volcanic crises in the Galápagos Islands and based on the methodology of [Vasconez et al. (2022)](https://doi.org/10.3390/rs14143483), the software has proven applicable to volcanic systems worldwide. By reducing technical barriers and integrating multiple workflows into a single application, `LavaFlow Mapper Suite` makes advanced satellite-based lava flow monitoring accessible to volcano observatories, civil protection agencies, researchers, students, and hazard managers.
 
+## Installation
 
-## Installation Guide
+Full instructions: **[documentation › Installation](https://lavaflow-mapper-suite.readthedocs.io/en/latest/installation/)**.
 
-We recommend using **Pixi** to manage the environment, as it automatically handles Python, complex geospatial dependencies, and all required libraries across Windows, macOS, and Linux. However, the users can also utilice Conda if they prefer.
+### Pixi (recommended)
 
-### 1. Install Pixi
-Open your terminal (macOS/Linux) or PowerShell (Windows) and paste the corresponding command:
+Install [Pixi](https://pixi.sh):
 
 **Windows (PowerShell):**
 ```powershell
@@ -47,35 +53,48 @@ powershell -ExecutionPolicy Bypass -c "irm -useb https://pixi.sh/install.ps1 | i
 ```bash
 curl -fsSL https://pixi.sh/install.sh | sh
 ```
-Close and re-open PowerShell/terminal, then confirm:
-```bash
-pixi --version
-```
 
-### 2. Setup the Project
-Clone this repository and enter the project folder:
+Then:
 ```bash
 git clone https://github.com/Panch021/LavaFlow_Mapper_Suite.git
-```
-```bash
 cd LavaFlow_Mapper_Suite
-```
-### 3. Run the Dashboard
-Since the project includes a pixi.toml file, you don't need to install dependencies manually. Just run this command and Pixi will set up everything and launch the app:
-
-```bash
 pixi run start
 ```
 
-### **For Conda users:
+### Conda
 ```bash
-1. conda --version
-2. git clone https://github.com/Panch021/LavaFlow_Mapper_Suite.git
-3. cd LavaFlow_Mapper_Suite
-4. conda env create -f environment.yml
-5. conda activate lavaflow_mapper
-6. python lavaflow_mapper_suite.py
+git clone https://github.com/Panch021/LavaFlow_Mapper_Suite.git
+cd LavaFlow_Mapper_Suite
+conda env create -f environment.yml
+conda activate lavaflow_mapper
+lavaflow-suite          # or: python lavaflow_mapper_suite.py
 ```
+
+### pip
+```bash
+python -m pip install "git+https://github.com/Panch021/LavaFlow_Mapper_Suite.git"
+lavaflow-suite --workdir ~/lavaflow_projects
+```
+
+The dashboard opens at <http://127.0.0.1:9050>. Run `lavaflow-suite --help` for the options.
+Downloading new data requires a free [NASA FIRMS MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/).
+The bundled example projects work without one.
+
+## Usage
+
+| Tab | What it does |
+|---|---|
+| 1. Global Config | Create/select a project (GVP catalogue), vent, period, filters, optional radius/shapefile/waypoints |
+| 2. FIRMS Download | VIIRS (SNPP, NOAA-20, NOAA-21) and MODIS detections, merged without duplicates |
+| 3. Anomalies Count | Daily/weekly (< 2 months) or weekly/monthly counts per sensor, with a matching period summary |
+| 4. FRP Statistics | Cumulative FRP statistics every 12 h |
+| 5. LavaFlow Mapper | Filtered anomaly map + FRP and distance series (mean/P95/max follow the zoom) |
+| 6. LavaFlow Propagation | Animation (12-h steps for periods of up to two weeks) and portrait MP4 export |
+| 7. Propagation Speed | Maximum runout and advance rate |
+| 8. Export Report | Self-contained HTML report |
+
+See the [quick start](https://lavaflow-mapper-suite.readthedocs.io/en/latest/quickstart/) and the
+[user guide](https://lavaflow-mapper-suite.readthedocs.io/en/latest/user-guide/).
 
 ## Examples
 * Comparison between thermal anomaly maps generated using all FIRMS thermal detections (left) and only those anomalies that satisfy the geolocation and Fire Radiative Power (FRP) filtering criteria implemented in LavaFlow Mapper Suite (right). The black polygon outlines the lava flow inundation area mapped by the Hawaiian Volcano Observatory for the 2018 Lower East Rift Zone (LERZ) eruption of Kīlauea [(Zoeller et al. 2020)](https://www.sciencebase.gov/catalog/item/5eba3f6082ce25b5135d5b85). The applied filters substantially reduce false detections and improve the spatial correspondence between satellite-derived thermal anomalies and the observed lava flow extent.
@@ -86,11 +105,49 @@ pixi run start
 
 <p align="center"><i> Click on the image to play the video.</i></p>
 
-## Citations
-If you find LavaFlow Mapper useful in your research, please consider citing the following paper to support my work. Thank you for your support.
+## Research use
 
-* Vasconez FJ, Anzieta JC, Müller AV, Bernard B, Ramón P. (2022) A Near Real-Time and Free Tool for the Preliminary Mapping of Active Lava Flows during Volcanic Crises: The Case of Hotspot Subaerial Eruptions. Remote Sensing 23. https://doi.org/https://doi.org/10.3390/rs14143483
+LavaFlow Mapper Suite is used at the Instituto Geofísico – Escuela Politécnica Nacional (IG-EPN, Ecuador)
+for the monitoring of effusive eruptions. The methodology it implements has been applied in:
 
+* Vasconez F.J. et al. (2022). *Remote Sensing* 14, 3483. <https://doi.org/10.3390/rs14143483>
+* <!-- TODO: add publications, reports, bulletins and conference abstracts that used THIS software -->
+
+Have you used the suite? Please [tell us](https://github.com/Panch021/LavaFlow_Mapper_Suite/issues/new?labels=use-case)
+so we can list your work here.
+
+## Development
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest            # offline test suite
+mkdocs serve                # documentation preview
+```
+
+The package lives in `lavaflow_suite/`, and its architecture is described in the
+[documentation](https://lavaflow-mapper-suite.readthedocs.io/en/latest/architecture/).
+Continuous integration runs the tests on Linux, macOS and Windows.
+
+## Contributing and support
+
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md).
+For questions or bugs, open an [issue](https://github.com/Panch021/LavaFlow_Mapper_Suite/issues). We aim to answer within two weeks.
+Changes are listed in the [CHANGELOG](CHANGELOG.md).
+
+## Citation
+
+If you use LavaFlow Mapper Suite, please cite the methodology paper (see also [CITATION.cff](CITATION.cff)):
+
+* Vasconez F.J., Anzieta J.C., Müller A.V., Bernard B., Ramón P. (2022). A Near Real-Time and Free Tool for the
+  Preliminary Mapping of Active Lava Flows during Volcanic Crises: The Case of Hotspot Subaerial Eruptions.
+  *Remote Sensing*, 14(14), 3483. <https://doi.org/10.3390/rs14143483>
+
+## License
+
+GPL-3.0. See [LICENSE](LICENSE).
 
 ## Acknowledgements
-The authors acknowledge the support of the Instituto Geofísico at Escuela Politécnica Nacional (Ecuador). This work was inspired by the Galápagos eruptions that occurred in 2022 and 2024 and developed as part of the monitoring efforts for active volcanism in Ecuador.
+
+The authors acknowledge the support of the Instituto Geofísico at Escuela Politécnica Nacional (Ecuador).
+This work was inspired by the Galápagos eruptions that occurred in 2022 and 2024 and developed as part of the
+monitoring efforts for active volcanism in Ecuador.

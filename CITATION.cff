@@ -1,0 +1,39 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it and the methodology paper below."
+title: "LavaFlow Mapper Suite"
+abstract: >-
+  Open-source Python application for the near-real-time mapping and monitoring of active
+  lava flows from NASA FIRMS VIIRS and MODIS thermal anomalies.
+type: software
+version: 2.1.0
+date-released: 2026-09-17
+license: GPL-3.0-or-later
+repository-code: "https://github.com/Panch021/LavaFlow_Mapper_Suite"
+keywords: [volcano, lava flow, VIIRS, MODIS, FIRMS, thermal remote sensing, hazard assessment]
+authors:
+  - family-names: Vasconez
+    given-names: Francisco J.
+    email: fjvasconez@igepn.edu.ec
+    affiliation: "Instituto Geofísico, Escuela Politécnica Nacional, Quito, Ecuador"
+preferred-citation:
+  type: article
+  title: >-
+    A Near Real-Time and Free Tool for the Preliminary Mapping of Active Lava Flows during
+    Volcanic Crises: The Case of Hotspot Subaerial Eruptions
+  journal: Remote Sensing
+  volume: 14
+  issue: 14
+  start: 3483
+  year: 2022
+  doi: 10.3390/rs14143483
+  authors:
+    - family-names: Vasconez
+      given-names: Francisco J.
+    - family-names: Anzieta
+      given-names: Juan C.
+    - family-names: Müller
+      given-names: Anais V.
+    - family-names: Bernard
+      given-names: Benjamin
+    - family-names: Ramón
+      given-names: Patricio
