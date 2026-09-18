@@ -6,6 +6,23 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- LavaFlow Mapper: **📍 Add waypoints** control on the map. Clicking captures coordinates in decimal
+  degrees, which can be named and saved as project waypoints (**SAVE AS PROJECT WAYPOINTS**), so they
+  are also drawn in the propagation, the video and the report. While capturing, map layers do not
+  intercept the click, so points can be captured on top of the anomalies.
+- `common.update_config_values()` updates individual configuration keys without rewriting the rest
+  of the file.
+
+### Changed
+- LavaFlow Propagation: the map now opens fitted to the filtered anomalies (same extent as the
+  LavaFlow Mapper) instead of a fixed zoom level around the vent.
+
+### Fixed
+- LavaFlow Propagation: permanent waypoint labels no longer blink during playback. The basemap,
+  shapefile, radius and waypoints are now drawn by their own callbacks instead of being rebuilt on
+  every animation step.
+
 ## [2.1.0] - 2026-09-17
 
 ### Added

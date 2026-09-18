@@ -53,9 +53,24 @@ Applies the filters and draws:
 * FRP and distance-to-vent time series per satellite. The statistics panel (mean, P95,
   max) follows the zoom of the plot.
 
+### Capturing coordinates
+
+The map has an **📍 Add waypoints** button (top-left, under the zoom controls). Activate it and every
+click on the map drops a numbered point, also on top of anomalies: while capturing, the anomalies,
+shapefile and waypoints stop reacting to clicks (no pop-ups), so nothing has to be hidden first.
+Zoom, pan and the layer control keep working. Each captured point is listed, with its coordinates in
+decimal degrees, in the *Captured coordinates* panel below the map. Give each point a name and press
+**SAVE AS PROJECT WAYPOINTS**: they are appended to the project's waypoints in the configuration
+file, and the waypoint layer is switched on. Run the mapper again to draw them, and they will also
+appear in the propagation animation, the video and the report. **CLEAR** discards the points that
+have not been saved.
+
 ## 6. LavaFlow Propagation
 
-Animated map with date slider, play/pause and speed control.
+Animated map with date slider, play/pause and speed control. The map opens fitted to the anomalies
+that passed the filters, the same extent used by the LavaFlow Mapper, so no manual zooming is needed
+before playing. The basemap and the reference layers (shapefile, radius, waypoints) are drawn once
+and stay fixed while the animation runs; only the anomalies are redrawn at each step.
 
 * Periods of **two weeks or less** advance in **12-hour** steps (VIIRS day and night
   passes), labelled with the actual overpass times.
