@@ -60,3 +60,47 @@ def test_waypoint_icon_fallback():
 
 def test_layout_builds(short_project):
     assert animation.get_layout() is not None
+
+
+def test_propagation_map_opens_on_the_anomalies(project):
+    from lavaflow_suite import video
+    cfg = lfc.load_global_config()
+    mapper.run_filter(cfg, project)
+    lay = animation.get_layout()
+
+    def find(node, wanted):
+        if getattr(node, 'id', None) == wanted:
+            return node
+        ch = getattr(node, 'children', None)
+        for c in (ch if isinstance(ch, list) else [ch] if ch is not None else []):
+            found = find(c, wanted)
+            if found is not None:
+                return found
+        return None
+
+    m = find(lay, 'main-map')
+    assert m is not None
+    df = lfc.load_filtered_data(project)
+    bounds = video.full_extent(df, cfg, [])          # anomalies + vent, layers excluded
+    assert m.bounds == bounds
+    center, zoom = lfc.center_zoom_for_bounds(bounds)
+    assert m.center == center and m.zoom == zoom
+    assert m.zoom > 12                               # a 10 km flow is not shown at the old zoom 12
+
+
+def test_static_layers_do_not_depend_on_the_time_slider(short_project):
+    import dash
+    app = dash.Dash(__name__, suppress_callback_exceptions=True)
+    animation.register_callbacks(app)
+    inputs_of = {}
+    for key, spec in app.callback_map.items():
+        for out in key.strip('.').split('...'):
+            inputs_of[out] = [i['id'] for i in spec['inputs']]
+    # waypoint labels and shapefile are rebuilt only when the layer selection changes,
+    # otherwise the permanent labels blink on every animation step
+    for out in ('static-waypoints-layer.children', 'shapefile-layer.children'):
+        assert 'time-slider' not in inputs_of[out], out
+        assert 'layer-toggle' in inputs_of[out]
+    assert inputs_of['base-layer.url'] == ['basemap-select']
+    # the anomalies still follow the slider
+    assert 'time-slider' in inputs_of['today-points-layer.children']

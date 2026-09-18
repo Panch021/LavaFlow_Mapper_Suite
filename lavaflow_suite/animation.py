@@ -160,7 +160,10 @@ def get_layout():
         layer_defaults.append('WPT')
 
     df = load_data()
-    init_bounds = video.full_extent(df, cfg, layer_defaults)
+    # open on the anomalies that passed the filters (same extent as the LavaFlow Mapper),
+    # not on a fixed zoom level around the vent
+    init_bounds = video.full_extent(df, cfg, [])
+    init_center, init_zoom = lfc.center_zoom_for_bounds(init_bounds)
     out_name = os.path.basename(video.output_path(folder, cfg))
 
     return html.Div([
@@ -216,7 +219,8 @@ def get_layout():
                     dl.LayerGroup(id="static-waypoints-layer"),
                     dl.ScaleControl(position="bottomleft", metric=True, imperial=False),
                     dl.Marker(position=vent, children=[dl.Tooltip("Vent")], icon=VENT_ICON),
-                ], id="main-map", bounds=init_bounds, center=vent, zoom=12,
+                ], id="main-map", bounds=init_bounds, center=init_center, zoom=init_zoom,
+                    zoomSnap=lfc.ZOOM_STEP,
                     style={'height': 'clamp(320px, 50vh, 640px)', 'width': '100%', 'borderRadius': '8px'}),
 
                 html.Div([
@@ -316,32 +320,24 @@ def register_callbacks(app):
     def step_forward(n, current_val, max_val):
         return current_val + 1 if current_val < max_val else 0
 
+    # Static layers (basemap, shapefile, radius, waypoints) have their own callbacks so that
+    # they are NOT re-created on every animation step: rebuilding the markers made the permanent
+    # waypoint labels blink while the anomalies advanced.
     @app.callback(
-        [Output('base-layer', 'url'), Output('base-layer', 'maxZoom'), Output('shapefile-layer', 'children'),
-         Output('past-points-layer', 'children'), Output('today-points-layer', 'children'),
-         Output('static-waypoints-layer', 'children'),
-         Output('timeseries-graph', 'figure'), Output('metrics-output', 'children'),
-         Output('current-date-display', 'children')],
-        [Input('time-slider', 'value'), Input('basemap-select', 'value'), Input('layer-toggle', 'value')]
+        [Output('base-layer', 'url'), Output('base-layer', 'maxZoom')],
+        Input('basemap-select', 'value'),
     )
-    def update_dashboard(days_passed, basemap_url, layers):
+    def update_basemap(basemap_url):
+        return basemap_url, (17 if basemap_url and 'opentopomap' in basemap_url else 19)
+
+    @app.callback(
+        [Output('shapefile-layer', 'children'), Output('static-waypoints-layer', 'children')],
+        Input('layer-toggle', 'value'),
+    )
+    def update_static_layers(layers):
         cfg = load_global_config()
         folder = get_active_folder()
-        df = load_data()
         layers = layers or []
-
-        frames, step = get_frames()
-        idx = min(max(int(days_passed or 0), 0), len(frames) - 1)
-        target, nxt = frames[idx]
-        subdaily = step < pd.Timedelta(days=1)
-
-        if df.empty:
-            all_visible = past = today = df
-        else:
-            all_visible = df[df['date'] < nxt]
-            today = all_visible[all_visible['date'] >= target]
-            past = all_visible[all_visible['date'] < target]
-
         shape_layer, wpt_layer = [], []
         if 'SHP' in layers:
             shp = lfc.shapefile_path(cfg, folder)
@@ -361,6 +357,30 @@ def register_callbacks(app):
                 wpt_layer.append(dl.Marker(position=[w['lat'], w['lon']], icon=waypoint_icon(w['symbol']),
                                            children=[dl.Tooltip(w['name'], permanent=True, direction='right')]
                                            if w['name'] else []))
+        return shape_layer, wpt_layer
+
+    @app.callback(
+        [Output('past-points-layer', 'children'), Output('today-points-layer', 'children'),
+         Output('timeseries-graph', 'figure'), Output('metrics-output', 'children'),
+         Output('current-date-display', 'children')],
+        [Input('time-slider', 'value'), Input('layer-toggle', 'value')]
+    )
+    def update_dashboard(days_passed, layers):
+        cfg = load_global_config()
+        df = load_data()
+        layers = layers or []
+
+        frames, step = get_frames()
+        idx = min(max(int(days_passed or 0), 0), len(frames) - 1)
+        target, nxt = frames[idx]
+        subdaily = step < pd.Timedelta(days=1)
+
+        if df.empty:
+            all_visible = past = today = df
+        else:
+            all_visible = df[df['date'] < nxt]
+            today = all_visible[all_visible['date'] >= target]
+            past = all_visible[all_visible['date'] < target]
 
         past_c = [dl.Circle(center=[r.latitude, r.longitude], radius=187.5, color="#f39c12",
                             fillOpacity=0.55, weight=0) for r in past.itertuples()]
@@ -374,8 +394,7 @@ def register_callbacks(app):
             html.Div([html.Div("Cumulative", className='k'), html.Div(len(all_visible), className='v')],
                      className='lf-stat'),
         ]
-        max_zoom = 17 if basemap_url and 'opentopomap' in basemap_url else 19
-        return (basemap_url, max_zoom, shape_layer, past_c, today_c, wpt_layer, fig, metrics,
+        return (past_c, today_c, fig, metrics,
                 lfc.frame_label(target, nxt, step, today['date'].values if subdaily and len(today) else None))
 
     # ---------------- video rendering ----------------
