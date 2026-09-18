@@ -42,6 +42,42 @@ Originally developed to support volcanic crises in the Galápagos Islands and ba
 
 Full instructions: **[documentation › Installation](https://lavaflow-mapper-suite.readthedocs.io/en/latest/installation/)**.
 
+## 0. Git (required)
+
+The commands below clone the repository, so Git must be available. Check with `git --version`;
+if the command is not found, install it:
+
+=== "Windows"
+
+```powershell
+    winget install --id Git.Git -e
+```
+
+    Alternatively download [Git for Windows](https://git-scm.com/download/win) and run the commands
+    in *Git Bash*.
+
+=== "macOS"
+
+```bash
+    xcode-select --install
+```
+
+    Or, with [Homebrew](https://brew.sh): `brew install git`.
+
+=== "Linux"
+
+```bash
+    sudo apt update && sudo apt install git     # Debian / Ubuntu
+    sudo dnf install git                        # Fedora / RHEL
+    sudo pacman -S git                          # Arch
+```
+
+Close and reopen the terminal afterwards.
+
+!!! tip "Without Git"
+    You can also click **Code → Download ZIP** on the repository page and unzip it. Updates then have
+    to be downloaded by hand, so Git is recommended.
+
 ### Pixi (recommended)
 
 Install [Pixi](https://pixi.sh):
